@@ -1,0 +1,18 @@
+{
+    background: "ffffffab",
+    outputs: {
+        "HDMI-A-1": {
+            modules_left: ["sway/workspaces"],
+        }
+    }, 
+    modules: {
+        "sway/workspaces": {
+            exec: "sway-workspaces.sh",
+            clickable: true,
+        }, 
+        datetime: {
+            exec: "datetime.sh",
+            clickable: true,
+        }
+    },
+}

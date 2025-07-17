@@ -1,0 +1,2 @@
+# BARbarian - simple wayland bar
+
