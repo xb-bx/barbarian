@@ -1,6 +1,8 @@
 package barbarian
 
+import "core:math"
 import "core:c"
+import "core:strings"
 import "core:os"
 import "core:time"
 import "core:c/libc"
@@ -15,30 +17,9 @@ import "core:sys/posix"
 import "base:runtime"
 import gl "vendor:OpenGL"
 import "vendor:egl"
-//import textrender "odin-text-renderer/text-renderer"
-//import sdl_ttf "vendor:sdl2/ttf"
 import "vendor:fontstash"
 import "vendor:nanovg"
 import nvgl "vendor:nanovg/gl"
-Color :: struct {
-    r: u8,
-    g: u8,
-    b: u8,
-    a: u8,
-}
-ModuleItem :: struct {
-    text:    string,
-    fg:      Color,
-    bg:      Color,
-    tooltip: string,
-    menu:    map[string]string,
-}
-Module :: struct {
-    pid: os.Pid, 
-    exec: string,
-    clickable: bool,
-    current_items: []ModuleItem,
-}
 Monitor :: struct {
     output:          ^wl.wl_output,
     name:            string,
@@ -49,9 +30,12 @@ Monitor :: struct {
     w:               int,
     h:               int,
     scale:           int,
-    modules:         []Module,
     refresh_surface: bool,
     nanovg_ctx:      ^nanovg.Context,
+    left:            []Module,
+    center:          []Module,
+    right:           []Module,
+    redraw:          bool,
 }
 State :: struct {
     display:     ^wl.wl_display,
@@ -64,6 +48,10 @@ State :: struct {
     rctx:        render.RenderContext,
 }
 
+get_monitor_by_name :: proc(st: ^State, name: string) -> ^Monitor {
+    for mon in st.monitors do if mon.name == name do return mon
+    return nil
+}
 get_or_create_monitor_for_output :: proc(st: ^State, output: ^wl.wl_output) -> ^Monitor {
     context.user_ptr = output
     i, found := slice.linear_search_proc(st.monitors[:], proc(x: ^Monitor) -> bool { return context.user_ptr == x.output })
@@ -126,6 +114,8 @@ output_scale :: proc "c" (data: rawptr, wl_output: ^wl.wl_output, factor: c.int3
 output_name  :: proc "c" (data: rawptr, wl_output: ^wl.wl_output, name: cstring) {
     st := transmute(^State)data
     context = st.ctx
+    monitor := get_or_create_monitor_for_output(st, wl_output)
+    monitor.name = strings.clone_from_cstring(name)
     fmt.println("output:", name)
 }
 output_description :: proc "c" (data: rawptr, wl_output: ^wl.wl_output, description: cstring) {
@@ -368,7 +358,9 @@ monitor_refresh_surface :: proc(state: ^State, monitor: ^Monitor) {
         os.exit(1)
     }
 }
-HEIGHT :: 25
+HEIGHT :: 20
+FONT_HEIGHT :: 15
+PAD :: 3.5
 main :: proc() {
     state: State = {}
     state.ctx = context
@@ -403,35 +395,144 @@ main :: proc() {
             fmt.println("Error making current!")
             return
         }
-        monitor.nanovg_ctx = nvgl.Create({.DEBUG, .ANTI_ALIAS, .STENCIL_STROKES})
-        nanovg.CreateFont(monitor.nanovg_ctx, "sans", "/usr/share/fonts/TTF/NotoSansMNerdFont-Regular.ttf")
+        monitor.nanovg_ctx = nvgl.Create({.DEBUG, .ANTI_ALIAS})
+        nanovg.CreateFont(monitor.nanovg_ctx, "sans", "/usr/share/fonts/TTF/NotoMonoNerdFontMono-Regular.ttf")
+        monitor.redraw = true
     }
     wl.display_roundtrip(display)
-
+    for output, out_config in cfg.outputs {
+        monitor := get_monitor_by_name(&state, output) 
+        if monitor == nil do fmt.eprintln("WARN: No output", output)
+        left := make([dynamic]Module)
+        for module in out_config.modules_left {
+            mod_cfg, ok := cfg.modules[module]
+            if !ok { 
+                fmt.eprintln("ERROR: No module", module)
+                continue
+            }
+            append(&left, Module {
+                exec      = mod_cfg.exec,
+                clickable = mod_cfg.clickable,
+            })
+        }
+        monitor.left = left[:]
+        for &mod in monitor.left {
+            err := run_module(&mod)
+            if err != nil do fmt.eprintln("ERROR: Failed to run module", mod.exec)
+        }
+    }
+    pollfds := make([dynamic]posix.pollfd)
+    
     for {
         for monitor in state.monitors {
-            if (!egl.MakeCurrent(state.rctx.display, monitor.egl_surface, monitor.egl_surface, state.rctx.ctx)) {
-                fmt.println("Error making current!")
-                return
-            }
-            {
-                ctx := monitor.nanovg_ctx
-                nanovg.BeginFrame(ctx, f32(monitor.w), f32(HEIGHT), 1)
-                defer nanovg.EndFrame(ctx)
-                nanovg.FillColor(ctx, nanovg.RGBA(0, 0, 0, 0xFF))
-                nanovg.Fill(ctx)
-                nanovg.FontSize(ctx, 17.5)
-                nanovg.FontFaceId(ctx, 0)
-                nanovg.FillColor(ctx, nanovg.RGBA(0xc7, 0xab, 0x7a,255))
-                nanovg.Text(ctx, 5, 18,  "1: Hello, world" )
-            }
+            if monitor.redraw {
+                if (!egl.MakeCurrent(state.rctx.display, monitor.egl_surface, monitor.egl_surface, state.rctx.ctx)) {
+                    fmt.println("Error making current!")
+                    return
+                }
+                {
+                    gl.ClearColor(0,0,0,1)
+                    gl.Clear(gl.COLOR_BUFFER_BIT)
+                    ctx := monitor.nanovg_ctx
+                    nanovg.BeginFrame(ctx, f32(monitor.w), f32(HEIGHT), 1)
+                    defer nanovg.EndFrame(ctx)
+                    nanovg.ClosePath(ctx)
+                    nanovg.FontSize(ctx, FONT_HEIGHT)
+                    nanovg.FontFaceId(ctx, 0)
+                    asc, desc, _ := nanovg.TextMetrics(ctx)
+                    x := f32(0)
+                    for mod in monitor.left {
+                        if mod.current_input.items == nil do continue
+                        for &item in mod.current_input.items.([]ModuleItem) {
+                            fmt.println(item)
+
+                            bounds := [4]f32 {}
+                            nanovg.TextAlign(ctx, .LEFT, .BASELINE)
+                            adv := nanovg.TextBounds(ctx, 0, HEIGHT, item.text, &bounds)
+                            text_width := adv
+                            text_height := bounds[3]-bounds[1]
+                            width := text_width + PAD*2
+
+                            nanovg.FillColor(ctx, nanovg.RGBA(item.bgColor.r, item.bgColor.g, item.bgColor.b,item.bgColor.a))
+                            nanovg.BeginPath(ctx)
+                            nanovg.Rect(ctx, x, 0, width, HEIGHT)
+                            nanovg.Fill(ctx)
+
+                            nanovg.FillColor(ctx, nanovg.RGBA(item.fgColor.r, item.fgColor.g, item.fgColor.b,item.fgColor.a))
+                            nanovg.Text(ctx, x + PAD, HEIGHT + (HEIGHT-text_height)/2 - bounds[1], item.text)
+                            item.pos = x
+                            item.width = width
+                            x += width
+                        }
+                        nanovg.BeginPath(ctx)
+                        nanovg.FillColor(ctx, nanovg.RGBA(255,255,255,255))
+                        nanovg.Rect(ctx, x, 0, 1, HEIGHT)
+                        nanovg.Fill(ctx)
+                        x+=2
+                    }
+                }
 
 
-            egl.SwapBuffers(state.rctx.display, monitor.egl_surface)
-            wl.wl_surface_damage_buffer(monitor.surface, 0, 0, 10, 10)
-            wl.wl_surface_commit(monitor.surface)
-            wl.display_roundtrip(display)
-            wl.display_dispatch(display)
+                egl.SwapBuffers(state.rctx.display, monitor.egl_surface)
+                wl.wl_surface_damage_buffer(monitor.surface, 0, 0, 1920, HEIGHT)
+                wl.wl_surface_commit(monitor.surface)
+                monitor.redraw = false
+                fmt.println("flush", wl.display_flush(display))
+            }
+        }
+        clear(&pollfds)
+        display_poll_fd := len(pollfds)
+        append(&pollfds, posix.pollfd { fd = posix.FD(display.fd), events = {.IN} })
+        for monitor in state.monitors {
+            for &mod in monitor.left {
+                mod.pollfd_index = len(pollfds)
+                append(&pollfds, posix.pollfd { fd = mod.pipe_out[0], events = {.IN, .OUT} })
+            }
+            for &mod in monitor.right {
+                mod.pollfd_index = len(pollfds)
+                append(&pollfds, posix.pollfd { fd = mod.pipe_out[0], events = {.IN, .OUT} })
+            }
+            for &mod in monitor.center {
+                mod.pollfd_index = len(pollfds)
+                append(&pollfds, posix.pollfd { fd = mod.pipe_out[0], events = {.IN, .OUT} })
+            }
+        }
+
+        fmt.println(pollfds)
+        res := posix.poll(slice.as_ptr(pollfds[:]), u32(len(pollfds)), -1)
+        fmt.println(pollfds)
+
+        for monitor in state.monitors {
+            for &mod in monitor.left {
+                if .IN in pollfds[mod.pollfd_index].revents {
+                    process_input(&mod)
+                }
+                if mod.redraw {
+                    mod.redraw = false
+                    monitor.redraw = true
+                }
+            }
+            for &mod in monitor.right {
+                if .IN in pollfds[mod.pollfd_index].revents {
+                    process_input(&mod)
+                }
+                if mod.redraw {
+                    mod.redraw = false
+                    monitor.redraw = true
+                }
+            }
+            for &mod in monitor.center {
+                if .IN in pollfds[mod.pollfd_index].revents {
+                    process_input(&mod)
+                }
+                if mod.redraw {
+                    mod.redraw = false
+                    monitor.redraw = true
+                }
+            }
+        }
+        if .IN in pollfds[display_poll_fd].revents {
+            fmt.println("dispatch", wl.display_dispatch(display))
         }
     }
 }

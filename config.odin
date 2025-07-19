@@ -8,7 +8,7 @@ OutputConfig :: struct {
     modules_right:  []string,
 }
 ModuleConfig :: struct {
-    exec:      string,
+    exec:      []string,
     clickable: bool,
 }
 Config :: struct {
