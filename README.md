@@ -6,6 +6,7 @@ The bar looks for $XDG_CONFIG_HOME/barbarian/config.json5 or $HOME/.config/barba
 ### Custom modules
 The bar communicates with modules via stdio
 A module must write either plain text or json to stdout
+
 Example module output:
 ```json
 {
@@ -25,6 +26,7 @@ Example module output:
 > The json must not contain new lines
 
 The module receives events(click, scroll, menu-item selected) via stdin
+
 Example module input:
 ```json
 {

@@ -80,7 +80,6 @@ menu_init :: proc(menu: ^Menu, state: ^State, parent: ^Monitor, items: ModuleMen
     menu.rerender = true
 }
 menu_render :: proc(menu: ^Menu) {
-    fmt.println("RENDER MENU")
     menu.rerender = false
     ctx := menu.surface.nvg_ctx
     if (!egl.MakeCurrent(menu.state.rctx.display, menu.surface.egl_surface, menu.surface.egl_surface, menu.state.rctx.ctx)) {

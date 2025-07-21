@@ -183,7 +183,7 @@ module_render :: proc(mod: ^Module, state: ^State, ctx: ^nanovg.Context, x: f32)
     }
     return max(x, mod.min_width)
 }
-process_input :: proc(module: ^Module) {
+process_input :: proc(module: ^Module, state: ^State) {
     line, err := bufio.reader_read_string(&module.rd, '\n')
     if err != nil {
         fmt.eprintln("ERROR: while reading module input", err) 
@@ -208,12 +208,12 @@ process_input :: proc(module: ^Module) {
             item.fgColor, ok = hex_to_color(item.fg)
             if !ok {
                 fmt.eprintln("WARN: received invalid color", item.fg)
-                item.fgColor = Color { 255, 255, 255, 255 }
+                item.fgColor = state.fg
             } 
             item.bgColor, ok = hex_to_color(item.bg)
             if !ok {
                 fmt.eprintln("WARN: received invalid color", item.bg)
-                item.bgColor = Color { 0, 0, 0, 255 }
+                item.bgColor = state.bg
             } 
         } 
         if module.current_input.items != nil do delete_items(module.current_input.items.([]ModuleItem))

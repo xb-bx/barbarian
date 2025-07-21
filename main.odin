@@ -643,7 +643,7 @@ main :: proc() {
             mon_iter := MonitorIterator {monitor = monitor}
             for mod in monitor_iter(&mon_iter) {
                 if .IN in pollfds[mod.pollfd_index].revents {
-                    process_input(mod)
+                    process_input(mod, &state)
                 }
                 if mod.redraw {
                     mod.redraw = false
