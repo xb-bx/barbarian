@@ -113,6 +113,7 @@ surface_init :: proc(surface: ^Surface, output: ^wl.wl_output, state: ^State, w:
 
     surface.layer_surface = wl.zwlr_layer_shell_v1_get_layer_surface(state.layer_shell, surface.wl_surface, output, wl.ZWLR_LAYER_SHELL_V1_LAYER_TOP, "wb")
     wl.zwlr_layer_surface_v1_set_size(surface.layer_surface, u32(w), u32(h))
+    wl.zwlr_layer_surface_v1_set_exclusive_zone(surface.layer_surface, i32(h))
     wl.zwlr_layer_surface_v1_set_anchor(surface.layer_surface, wl.ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP)
 
     wl.zwlr_layer_surface_v1_set_keyboard_interactivity(surface.layer_surface, wl.ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND)

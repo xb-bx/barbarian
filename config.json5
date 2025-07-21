@@ -1,18 +1,30 @@
 {
-    background: "ffffffab",
+    background: "00000022",
+    foreground: "ffffffff",
+    font: "/usr/share/fonts/TTF/LiterationSansNerdFont-Regular.ttf",
+    font_size: 15, 
+    height: 20,
     outputs: {
         "HDMI-A-1": {
-            modules_left: ["sway/workspaces"],
+            modules_left: ["sway.workspaces", "datetime", "weather"],
+            modules_right: ["sway.language", "network-speed", "sway.language"],
         }
     }, 
     modules: {
-        "sway/workspaces": {
-            exec: "sway-workspaces.sh",
+        "sway.workspaces": {
+            exec: ["sway-workspaces.py"]
             clickable: true,
-        }, 
-        datetime: {
-            exec: "datetime.sh",
+        },
+        "datetime": {
+            exec: ["datetime.sh"]
             clickable: true,
-        }
+        },
+        "sway.language": {
+            exec: ["sway-language.sh"]
+        },
+        "network-speed": {
+            exec: ["network-speed.py"]
+            min_width: 80,
+        },
     },
 }
