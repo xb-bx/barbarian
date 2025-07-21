@@ -1,5 +1,7 @@
 package barbarian
 
+import "core:mem"
+import "core:encoding/json"
 import "core:math"
 import "core:c"
 import "core:strings"
@@ -20,22 +22,25 @@ import "vendor:egl"
 import "vendor:fontstash"
 import "vendor:nanovg"
 import nvgl "vendor:nanovg/gl"
+Mouse :: struct {
+    pos_x:  f32,
+    pos_y:  f32,
+    handler: ^MouseHandler,
+}
+MonitorIterator :: struct {
+    monitor: ^Monitor,
+    idx: int,
+    inner: int,
+}
 Monitor :: struct {
+    mouse_handler:   MouseHandler,
     output:          ^wl.wl_output,
     name:            string,
-    egl_surface:     egl.Surface,
-    egl_window:      ^wl.egl_window,
-    surface:         ^wl.wl_surface,
-    layer_surface:   ^wl.zwlr_layer_surface_v1,
-    w:               int,
-    h:               int,
-    scale:           int,
-    refresh_surface: bool,
-    nanovg_ctx:      ^nanovg.Context,
+    //refresh_surface: bool,
     left:            []Module,
     center:          []Module,
     right:           []Module,
-    redraw:          bool,
+    surface:         Surface,
 }
 State :: struct {
     display:     ^wl.wl_display,
@@ -46,10 +51,107 @@ State :: struct {
     monitors:    [dynamic]^Monitor,
     ctx:         runtime.Context,
     rctx:        render.RenderContext,
+    xdg_wm_base: ^wl.xdg_wm_base,
+    mouse:       Mouse,
+    bg:          Color,
+    fg:          Color,
+    menu:        ^Menu,
+    font:        []byte,
+    font_size:   f32,
 }
-
+MouseHandler :: struct {
+    data: rawptr,
+    motion: proc(data: rawptr, state: ^State, pos_x: f32, pos_y: f32),
+    click: proc(data: rawptr, state: ^State, btn: MouseButton, serial: u32),
+    scroll: proc(data: rawptr, state: ^State, dir: int),
+}
+monitor_iter :: proc(using iter: ^MonitorIterator) -> (^Module, bool) {
+    mods: []Module = {}
+    for idx < 3 {
+        switch idx {
+            case 0:
+                mods = monitor.left
+            case 1:
+                mods = monitor.center
+            case 2:
+                mods = monitor.right
+        }
+        if inner >= len(mods) {
+            idx += 1
+            inner = 0
+            continue
+        }
+        inner += 1
+        return &mods[inner - 1], true
+    }
+    return nil, false
+}
+monitor_mouse_motion :: proc(data: rawptr, state: ^State, pos_x: f32, pos_y: f32) {
+}
+monitor_mouse_scroll :: proc(data: rawptr, state: ^State, dir: int) {
+    mon := cast(^Monitor)data
+    mod_iter := MonitorIterator { monitor = mon }  
+    res_mod: ^Module = nil
+    item_index := -1
+    for mod in monitor_iter(&mod_iter) {
+        if mod.current_input.items == nil do continue
+        items := mod.current_input.items.([]ModuleItem)
+        for item, i in items {
+            if state.mouse.pos_x >= item.pos && state.mouse.pos_x <= item.pos + item.width {
+                item_index = i 
+                res_mod = mod
+                break
+            }
+        }
+        if res_mod != nil do break
+    }
+    if res_mod != nil {
+        send_event(res_mod, ModuleEvent { type = .Scroll, scroll = ScrollEvent { dir = dir }})
+    }
+}
+monitor_mouse_click :: proc(data: rawptr, state: ^State, btn: MouseButton, serial: u32) {
+    mon := cast(^Monitor)data
+    menu_close(state)
+    mod_iter := MonitorIterator { monitor = mon }  
+    res_mod: ^Module = nil
+    item_index := -1
+    for mod in monitor_iter(&mod_iter) {
+        if mod.current_input.items == nil do continue
+        items := mod.current_input.items.([]ModuleItem)
+        for item, i in items {
+            if state.mouse.pos_x >= item.pos && state.mouse.pos_x <= item.pos + item.width {
+                item_index = i 
+                res_mod = mod
+                break
+            }
+        }
+        if res_mod != nil do break
+    }
+    if res_mod != nil {
+        if res_mod.current_input.menu != nil && res_mod.current_input.menu.(ModuleMenu).open_on == btn {
+            state.menu = new(Menu)
+            menu := res_mod.current_input.menu.(ModuleMenu)
+            menu_init(state.menu, state, mon, menu, proc(data: rawptr, index: int) {
+                mod := cast(^Module)data
+                item := mod.current_input.menu.(ModuleMenu).items[index]   
+                send_event(mod, { type = .Menu, menu = MenuEvent { key = item.key } })
+            }, res_mod, mon.surface.nvg_ctx)
+            wl.xdg_popup_grab(state.menu.surface.xdg_popup, state.seat, serial)
+        } else {
+            if res_mod.clickable {
+                send_event(res_mod, { type = .Click, click = ClickEvent { button = btn, item = item_index } })
+            }
+        }
+    }
+}
 get_monitor_by_name :: proc(st: ^State, name: string) -> ^Monitor {
     for mon in st.monitors do if mon.name == name do return mon
+    return nil
+}
+get_monitor_by_surface :: proc(st: ^State, surface: ^wl.wl_surface) -> ^Monitor {
+    context.user_ptr = surface
+    i, found := slice.linear_search_proc(st.monitors[:], proc(x: ^Monitor) -> bool { return context.user_ptr == x.surface.wl_surface })
+    if found do return st.monitors[i]
     return nil
 }
 get_or_create_monitor_for_output :: proc(st: ^State, output: ^wl.wl_output) -> ^Monitor {
@@ -57,6 +159,12 @@ get_or_create_monitor_for_output :: proc(st: ^State, output: ^wl.wl_output) -> ^
     i, found := slice.linear_search_proc(st.monitors[:], proc(x: ^Monitor) -> bool { return context.user_ptr == x.output })
     if found do return st.monitors[i]
     mon := new(Monitor)
+    mon.mouse_handler = {
+        data = mon,
+        motion = monitor_mouse_motion,
+        click = monitor_mouse_click,
+        scroll = monitor_mouse_scroll,
+    }
     mon.output = output
     append(&st.monitors, mon)
     return mon
@@ -96,20 +204,20 @@ output_mode :: proc "c" (
     st := transmute(^State)data
     context = st.ctx
     monitor := get_or_create_monitor_for_output(st, wl_output)
-    monitor.w = int(width)
-    monitor.h = int(height)
+    monitor.surface.w = int(width)
+    monitor.surface.h = HEIGHT
 }
 output_done  :: proc "c" (data: rawptr, wl_output: ^wl.wl_output) {
     st := transmute(^State)data
     context = st.ctx
     monitor := get_or_create_monitor_for_output(st, wl_output)
-    monitor.refresh_surface = true
+    //monitor.refresh_surface = true
 }
 output_scale :: proc "c" (data: rawptr, wl_output: ^wl.wl_output, factor: c.int32_t) {
     st := transmute(^State)data
     context = st.ctx
     monitor := get_or_create_monitor_for_output(st, wl_output)
-    monitor.scale = int(factor)
+    monitor.surface.scale = int(factor)
 }
 output_name  :: proc "c" (data: rawptr, wl_output: ^wl.wl_output, name: cstring) {
     st := transmute(^State)data
@@ -147,6 +255,11 @@ wl_fixed_from_double :: proc(d: f64) -> wl.wl_fixed_t {
     u.d = d + f64(3 << (51 - 8))
     return wl.wl_fixed_t(u.i)
 }
+MouseButton :: enum {
+    Left   = 272,
+    Right  = 273,
+    Middle = 274,
+}
 pointer_listener: wl.wl_pointer_listener = {
     enter = proc "c" (
         data: rawptr,
@@ -155,13 +268,30 @@ pointer_listener: wl.wl_pointer_listener = {
         surface: ^wl.wl_surface,
         surface_x: wl.wl_fixed_t,
         surface_y: wl.wl_fixed_t,
-    ) {},
+    ) {
+        state: ^State = cast(^State)data
+        context = state.ctx
+        mon := get_monitor_by_surface(state, surface)
+        //assert(mon != nil)
+        if mon != nil {
+            state.mouse.handler = &mon.mouse_handler
+        } else {
+            if state.menu != nil {
+                state.mouse.handler = &state.menu.handler
+            }
+        }
+
+    },
     leave = proc "c" (
         data: rawptr,
         wl_pointer: ^wl.wl_pointer,
         serial: c.uint32_t,
         surface: ^wl.wl_surface,
-    ) {},
+    ) {
+        state: ^State = cast(^State)data
+        context = state.ctx
+        state.mouse.handler = nil
+    },
     motion = proc "c" (
         data: rawptr,
         wl_pointer: ^wl.wl_pointer,
@@ -171,6 +301,9 @@ pointer_listener: wl.wl_pointer_listener = {
     ) {
         state: ^State = cast(^State)data
         context = state.ctx
+        state.mouse.pos_x = f32(wl_fixed_to_double(surface_x))
+        state.mouse.pos_y = f32(wl_fixed_to_double(surface_y))
+        state.mouse.handler.motion(state.mouse.handler.data, state, state.mouse.pos_x, state.mouse.pos_y)
     },
     button = proc "c" (
         data: rawptr,
@@ -179,14 +312,66 @@ pointer_listener: wl.wl_pointer_listener = {
         time: c.uint32_t,
         button: c.uint32_t,
         state: c.uint32_t,
-    ) {},
+    ) {
+        st := cast(^State)data
+        btn := MouseButton(button)
+        context = st.ctx
+        fmt.println("click", state)
+        if state == 0 && st.mouse.handler != nil {
+            st.mouse.handler.click(st.mouse.handler.data, st, btn, serial)
+        }
+    },
     axis = proc "c" (
         data: rawptr,
         wl_pointer: ^wl.wl_pointer,
         time: c.uint32_t,
         axis: c.uint32_t,
         value: wl.wl_fixed_t,
-    ) {},
+    ) {
+        st := cast(^State)data
+        context = st.ctx
+        if st.mouse.handler != nil {
+            dir := 0
+            if value > 0 do dir = 1
+            if value < 0 do dir = -1
+            st.mouse.handler.scroll(st.mouse.handler.data, st, dir)
+        }
+    },
+    axis_source = proc "c" (
+        data: rawptr,
+        wl_pointer: ^wl.wl_pointer,
+        axis_source: c.uint32_t,
+    ) {
+    },
+	axis_stop = proc "c" (
+		data: rawptr,
+		wl_pointer: ^wl.wl_pointer,
+		time: c.uint32_t,
+		axis: c.uint32_t,
+	) {
+    },
+	axis_discrete = proc "c" (
+		data: rawptr,
+		wl_pointer: ^wl.wl_pointer,
+		axis: c.uint32_t,
+		discrete: c.int32_t,
+	) {
+    },
+	axis_value120 = proc "c" (
+		data: rawptr,
+		wl_pointer: ^wl.wl_pointer,
+		axis: c.uint32_t,
+		value120: c.int32_t,
+	) {
+    },
+	axis_relative_direction = proc "c" (
+		data: rawptr,
+		wl_pointer: ^wl.wl_pointer,
+		axis: c.uint32_t,
+		direction: c.uint32_t,
+	) {
+    },
+    
     frame = proc "c" (data: rawptr, wl_pointer: ^wl.wl_pointer) {}
 }
 seat_listener: wl.wl_seat_listener = {
@@ -203,6 +388,15 @@ seat_listener: wl.wl_seat_listener = {
         fmt.println("seat name:", name)
     }
 
+}
+xdg_listener := wl.xdg_wm_base_listener {
+    ping = proc "c" (
+		data: rawptr,
+		xdg_wm_base: ^wl.xdg_wm_base,
+		serial: c.uint32_t,
+	) {
+        wl.xdg_wm_base_pong(xdg_wm_base, serial)
+    }
 }
 global :: proc "c" (
     data: rawptr,
@@ -236,6 +430,10 @@ global :: proc "c" (
         state.seat = cast(^wl.wl_seat)wl.wl_registry_bind(registry, name, &wl.wl_seat_interface, version)
         wl.wl_seat_add_listener(state.seat, &seat_listener, state)
     }
+    if interface == wl.xdg_wm_base_interface.name {
+        state.xdg_wm_base = cast(^wl.xdg_wm_base)wl.wl_registry_bind(registry, name, &wl.xdg_wm_base_interface, version)
+        wl.xdg_wm_base_add_listener(state.xdg_wm_base, &xdg_listener, state)
+    }
 
     if interface == wl.zwlr_layer_shell_v1_interface.name {
         state.layer_shell =
@@ -265,44 +463,6 @@ buffer_listener := wl.wl_buffer_listener {
     },
 }
 
-get_buffer :: proc(state: ^State, width: c.int32_t, height: c.int32_t) -> ^wl.wl_buffer {
-    stride := width * 4
-    shm_pool_size := height * stride
-
-    fd := cast(posix.FD)utils.allocate_shm_file(cast(uint)shm_pool_size)
-    if fd < 0 {
-        fmt.println("Errror")
-        return nil
-    }
-    pool := wl.wl_shm_create_pool(state.shm, cast(c.int32_t)fd, shm_pool_size)
-
-    pool_data := posix.mmap(
-        nil,
-        cast(uint)shm_pool_size,
-        {posix.Prot_Flag_Bits.READ, posix.Prot_Flag_Bits.WRITE},
-        {posix.Map_Flag_Bits.SHARED},
-        fd,
-        0,
-    )
-    buffer := wl.wl_shm_pool_create_buffer(pool, 0, width, height, stride, 0)
-
-    wl.wl_shm_pool_destroy(pool)
-    posix.close(fd)
-
-
-    //posix.munmap(pool_data, cast(uint)shm_pool_size)
-    pixels := cast([^]pixel)pool_data
-    for i in 1 ..= shm_pool_size / 4 {
-        pixels[i].a = 255
-        pixels[i].r = 0x9a
-        pixels[i].g = 0xce
-        pixels[i].b = 0xeb
-    }
-
-    wl.wl_buffer_add_listener(buffer, &buffer_listener, nil)
-
-    return buffer
-}
 w: int = 0
 h: int = 0
 layer_listener:  wl.zwlr_layer_surface_v1_listener = {
@@ -327,39 +487,7 @@ layer_listener:  wl.zwlr_layer_surface_v1_listener = {
 
     }
 }
-monitor_refresh_surface :: proc(state: ^State, monitor: ^Monitor) {
-    monitor.refresh_surface = false
-    if monitor.surface != nil do wl.wl_surface_destroy(monitor.surface) 
-    if monitor.egl_surface != nil {
-        egl.DestroySurface(state.rctx.display, monitor.egl_surface) 
-        wl.egl_window_destroy(monitor.egl_window)
-    }
-    monitor.surface = wl.wl_compositor_create_surface(state.compositor)
-
-    monitor.layer_surface = wl.zwlr_layer_shell_v1_get_layer_surface(state.layer_shell, monitor.surface, monitor.output, wl.ZWLR_LAYER_SHELL_V1_LAYER_TOP, "wb")
-    wl.zwlr_layer_surface_v1_set_size(monitor.layer_surface, u32(monitor.w), HEIGHT)
-    wl.zwlr_layer_surface_v1_set_anchor(monitor.layer_surface, wl.ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP)
-
-    wl.zwlr_layer_surface_v1_set_keyboard_interactivity(monitor.layer_surface, wl.ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND)
-    wl.zwlr_layer_surface_v1_add_listener(monitor.layer_surface, &layer_listener, nil)
-
-    wl.wl_surface_commit(monitor.surface)
-    wl.display_roundtrip(state.display)
-    monitor.egl_window = wl.egl_window_create(monitor.surface, i32(monitor.w), HEIGHT)
-    fmt.println(monitor.egl_window == nil)
-    monitor.egl_surface = egl.CreateWindowSurface(
-        state.rctx.display,
-        state.rctx.config,
-        egl.NativeWindowType(monitor.egl_window),
-        nil,
-    )
-    if monitor.egl_surface == egl.NO_SURFACE {
-        fmt.println("Error creating window surface")
-        os.exit(1)
-    }
-}
 HEIGHT :: 20
-FONT_HEIGHT :: 15
 PAD :: 3.5
 main :: proc() {
     state: State = {}
@@ -369,6 +497,18 @@ main :: proc() {
         fmt.eprintln("ERROR:", err)
         os.exit(1)
     }
+    fontdata, os_err := os.read_entire_file_or_err(cfg.font)
+    if os_err != nil {
+        fmt.eprintln("ERROR:", os_err)
+        os.exit(1)
+    }
+    state.font = fontdata
+    state.font_size = cfg.font_size
+    color_ok := false
+    state.bg, color_ok = hex_to_color(cfg.background)
+    if !color_ok do state.bg = Color { 0, 0, 0, 0xFF }
+    state.fg, color_ok = hex_to_color(cfg.foreground)
+    if !color_ok do state.fg = Color { 0xFF, 0xFF, 0xFF, 0xFF }
     display := wl.display_connect(nil)
     state.display = display
     registry := wl.wl_display_get_registry(display)
@@ -385,19 +525,19 @@ main :: proc() {
     state.rctx = render.init_egl(display)
     gl.load_up_to(int(4), 5, egl.gl_set_proc_address)
     for monitor in state.monitors {
-        monitor_refresh_surface(&state, monitor)
+        surface_init(&monitor.surface, monitor.output, &state, monitor.surface.w, monitor.surface.h)
     }
     wl.display_roundtrip(display)
 
 
     for monitor in state.monitors {
-        if (!egl.MakeCurrent(state.rctx.display, monitor.egl_surface, monitor.egl_surface, state.rctx.ctx)) {
+        if (!egl.MakeCurrent(state.rctx.display, monitor.surface.egl_surface, monitor.surface.egl_surface, state.rctx.ctx)) {
             fmt.println("Error making current!")
             return
         }
-        monitor.nanovg_ctx = nvgl.Create({.DEBUG, .ANTI_ALIAS})
-        nanovg.CreateFont(monitor.nanovg_ctx, "sans", "/usr/share/fonts/TTF/NotoMonoNerdFontMono-Regular.ttf")
-        monitor.redraw = true
+        monitor.surface.nvg_ctx = nvgl.Create({.DEBUG, .ANTI_ALIAS})
+        nanovg.CreateFontMem(monitor.surface.nvg_ctx, "sans", state.font, false)
+        monitor.surface.redraw = true
     }
     wl.display_roundtrip(display)
     for output, out_config in cfg.outputs {
@@ -410,6 +550,7 @@ main :: proc() {
                 fmt.eprintln("ERROR: No module", module)
                 continue
             }
+            fmt.println(mod_cfg)
             append(&left, Module {
                 exec      = mod_cfg.exec,
                 clickable = mod_cfg.clickable,
@@ -422,29 +563,37 @@ main :: proc() {
         }
     }
     pollfds := make([dynamic]posix.pollfd)
-    
+    counter := 100
+    wl.display_roundtrip(display)
     for {
+        if state.menu != nil && state.menu.rerender {
+            menu_render(state.menu)
+            egl.SwapBuffers(state.rctx.display, state.menu.surface.egl_surface)
+            wl.wl_surface_damage_buffer(state.menu.surface.wl_surface, 0, 0, i32(state.menu.surface.w), i32(state.menu.surface.h))
+            wl.wl_surface_commit(state.menu.surface.wl_surface)
+            wl.display_flush(display)
+            wl.display_dispatch_pending(display)
+        }
         for monitor in state.monitors {
-            if monitor.redraw {
-                if (!egl.MakeCurrent(state.rctx.display, monitor.egl_surface, monitor.egl_surface, state.rctx.ctx)) {
+            if monitor.surface.redraw {
+                if (!egl.MakeCurrent(state.rctx.display, monitor.surface.egl_surface, monitor.surface.egl_surface, state.rctx.ctx)) {
                     fmt.println("Error making current!")
                     return
                 }
                 {
                     gl.ClearColor(0,0,0,1)
                     gl.Clear(gl.COLOR_BUFFER_BIT)
-                    ctx := monitor.nanovg_ctx
-                    nanovg.BeginFrame(ctx, f32(monitor.w), f32(HEIGHT), 1)
+                    gl.Viewport(0, 0, i32(monitor.surface.w), i32(monitor.surface.h))
+                    ctx := monitor.surface.nvg_ctx
+                    nanovg.BeginFrame(ctx, f32(monitor.surface.w), f32(monitor.surface.h), 1)
                     defer nanovg.EndFrame(ctx)
-                    nanovg.ClosePath(ctx)
-                    nanovg.FontSize(ctx, FONT_HEIGHT)
+                    nanovg.FontSize(ctx, state.font_size)
                     nanovg.FontFaceId(ctx, 0)
                     asc, desc, _ := nanovg.TextMetrics(ctx)
                     x := f32(0)
                     for mod in monitor.left {
                         if mod.current_input.items == nil do continue
                         for &item in mod.current_input.items.([]ModuleItem) {
-                            fmt.println(item)
 
                             bounds := [4]f32 {}
                             nanovg.TextAlign(ctx, .LEFT, .BASELINE)
@@ -473,66 +622,40 @@ main :: proc() {
                 }
 
 
-                egl.SwapBuffers(state.rctx.display, monitor.egl_surface)
-                wl.wl_surface_damage_buffer(monitor.surface, 0, 0, 1920, HEIGHT)
-                wl.wl_surface_commit(monitor.surface)
-                monitor.redraw = false
-                fmt.println("flush", wl.display_flush(display))
+                egl.SwapBuffers(state.rctx.display, monitor.surface.egl_surface)
+                wl.wl_surface_damage_buffer(monitor.surface.wl_surface, 0, 0, i32(monitor.surface.w), i32(monitor.surface.h))
+                wl.wl_surface_commit(monitor.surface.wl_surface)
+                monitor.surface.redraw = false
+                wl.display_flush(display)
             }
         }
         clear(&pollfds)
         display_poll_fd := len(pollfds)
         append(&pollfds, posix.pollfd { fd = posix.FD(display.fd), events = {.IN} })
         for monitor in state.monitors {
-            for &mod in monitor.left {
-                mod.pollfd_index = len(pollfds)
-                append(&pollfds, posix.pollfd { fd = mod.pipe_out[0], events = {.IN, .OUT} })
-            }
-            for &mod in monitor.right {
-                mod.pollfd_index = len(pollfds)
-                append(&pollfds, posix.pollfd { fd = mod.pipe_out[0], events = {.IN, .OUT} })
-            }
-            for &mod in monitor.center {
+            mon_iter := MonitorIterator {monitor = monitor}
+            for mod in monitor_iter(&mon_iter) {
                 mod.pollfd_index = len(pollfds)
                 append(&pollfds, posix.pollfd { fd = mod.pipe_out[0], events = {.IN, .OUT} })
             }
         }
 
-        fmt.println(pollfds)
         res := posix.poll(slice.as_ptr(pollfds[:]), u32(len(pollfds)), -1)
-        fmt.println(pollfds)
 
         for monitor in state.monitors {
-            for &mod in monitor.left {
+            mon_iter := MonitorIterator {monitor = monitor}
+            for mod in monitor_iter(&mon_iter) {
                 if .IN in pollfds[mod.pollfd_index].revents {
-                    process_input(&mod)
+                    process_input(mod)
                 }
                 if mod.redraw {
                     mod.redraw = false
-                    monitor.redraw = true
-                }
-            }
-            for &mod in monitor.right {
-                if .IN in pollfds[mod.pollfd_index].revents {
-                    process_input(&mod)
-                }
-                if mod.redraw {
-                    mod.redraw = false
-                    monitor.redraw = true
-                }
-            }
-            for &mod in monitor.center {
-                if .IN in pollfds[mod.pollfd_index].revents {
-                    process_input(&mod)
-                }
-                if mod.redraw {
-                    mod.redraw = false
-                    monitor.redraw = true
+                    monitor.surface.redraw = true
                 }
             }
         }
         if .IN in pollfds[display_poll_fd].revents {
-            fmt.println("dispatch", wl.display_dispatch(display))
+            wl.display_dispatch(display)
         }
     }
 }

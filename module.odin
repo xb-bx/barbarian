@@ -1,5 +1,6 @@
 package barbarian
 import "core:sys/posix"
+import "core:container/queue"
 import "core:encoding/json"
 import "core:strings"
 import "core:strconv"
@@ -23,12 +24,40 @@ ModuleItem :: struct {
     pos:     f32,
     width:   f32,
 }
+ModuleMenuItem :: struct {
+    key: string,
+    value: string,
+}
+ModuleMenu :: struct {
+    items:   []ModuleMenuItem,
+    open_on: MouseButton,
+}
 ModuleInput :: struct {
     items:   Maybe([]ModuleItem),
-    menu:    Maybe(map[string]string),
+    menu:    Maybe(ModuleMenu),
     tooltip: Maybe(string),
 }
-
+ClickEvent :: struct {
+    button: MouseButton,
+    item: int,
+}
+MenuEvent :: struct {
+    key: string,
+}
+ScrollEvent :: struct {
+    dir: int,
+}
+ModuleEventType :: enum {
+    Click,
+    Menu,
+    Scroll,
+}
+ModuleEvent :: struct {
+    type:   ModuleEventType,
+    click:  Maybe(ClickEvent)  `json:"event,omitempty"`,
+    menu:   Maybe(MenuEvent)   `json:"event,omitempty"`,
+    scroll: Maybe(ScrollEvent) `json:"event,omitempty"`,
+}
 Module :: struct {
     pid:             posix.pid_t, 
     exec:            []string,
@@ -52,7 +81,6 @@ pipe :: proc(fdes: ^[2]posix.FD) -> posix.Errno {
 run_module :: proc(module: ^Module) -> posix.Errno {
     pipe(&module.pipe_in) or_return
     pipe(&module.pipe_out) or_return
-    fmt.println(1)
     pid := fork() or_return
     if pid == 0 {
         posix.close(module.pipe_in[1])
@@ -68,7 +96,7 @@ run_module :: proc(module: ^Module) -> posix.Errno {
         posix.close(module.pipe_out[1])
         module.pid = pid
     }
-    
+    posix.fcntl(module.pipe_in[1], .SETFL, posix.fcntl(module.pipe_in[1], .GETFL, 0) | posix.O_NONBLOCK)
     bufio.reader_init(&module.rd, os.stream_from_handle(os.Handle(module.pipe_out[0])))
     return nil
 }
@@ -94,24 +122,36 @@ delete_items :: proc(items: []ModuleItem) {
     }
     delete(items)
 }
-delete_menu :: proc(menu: map[string]string) {
-    for k,v in menu {
-        delete(k)
-        delete(v)
+delete_menu :: proc(menu: ModuleMenu) {
+    for item in menu.items {
+        delete(item.key)
+        delete(item.value)
     }
-    delete(menu)
+    delete(menu.items)
+}
+send_event :: proc(module: ^Module, event: ModuleEvent) {
+    b : strings.Builder = {}
+    defer strings.builder_destroy(&b)
+    strings.builder_init(&b)
+    opt := json.Marshal_Options {pretty = false, spec = .JSON, use_enum_names = true, }
+    err := json.marshal_to_builder(&b, event, &opt)
+    if err != nil { fmt.eprintln(err); panic("err") }
+    strings.write_rune(&b, '\n')
+
+    res := posix.write(module.pipe_in[1], slice.as_ptr(b.buf[:]), len(b.buf))
+    if res == -1 {
+        fmt.eprintln("WARN: Could not send event to module", posix.errno())
+    }
 }
 process_input :: proc(module: ^Module) {
     line, err := bufio.reader_read_string(&module.rd, '\n')
-    fmt.println("READ") 
     if err != nil {
         fmt.eprintln("ERROR: while reading module input", err) 
     }
     defer delete(line)
     input: ModuleInput = {}
-    jerr := json.unmarshal_string(line, &input, .JSON5)
+    jerr := json.unmarshal_string(line, &input, .JSON)
     if jerr != nil {
-        fmt.println(jerr)
         items := make([]ModuleItem, 1)
         if module.current_input.items != nil do delete_items(module.current_input.items.([]ModuleItem))
         module.current_input.items = items
@@ -141,8 +181,9 @@ process_input :: proc(module: ^Module) {
         module.redraw = true
     } 
     if input.menu != nil {
-        menu := input.menu.(map[string]string)
-        if module.current_input.menu != nil do delete_menu(module.current_input.menu.(map[string]string))
+        menu := input.menu.(ModuleMenu)
+        fmt.println(menu)
+        if module.current_input.menu != nil do delete_menu(module.current_input.menu.(ModuleMenu))
         module.current_input.menu = menu
     }
     if input.tooltip != nil {

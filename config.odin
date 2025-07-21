@@ -15,6 +15,9 @@ Config :: struct {
     outputs:    map[string]OutputConfig,
     modules:    map[string]ModuleConfig,
     background: string,
+    foreground: string,
+    font:       string,
+    font_size:  f32,
 }
 ConfigError :: union #shared_nil {
     os.Error,
