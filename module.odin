@@ -9,6 +9,7 @@ import "core:bufio"
 import "core:io"
 import "core:os"
 import "core:fmt"
+import "vendor:nanovg"
 Color :: struct {
     r: u8,
     g: u8,
@@ -68,6 +69,7 @@ Module :: struct {
     rd:              bufio.Reader,
     redraw:          bool,
     pollfd_index:    int,
+    min_width:       f32,
 }
 fork :: proc() -> (posix.pid_t, posix.Errno) {
     res := posix.fork()
@@ -142,6 +144,44 @@ send_event :: proc(module: ^Module, event: ModuleEvent) {
     if res == -1 {
         fmt.eprintln("WARN: Could not send event to module", posix.errno())
     }
+}
+calculate_width :: proc(module: ^Module, ctx: ^nanovg.Context) -> f32 {
+    if module.current_input.items == nil do return 0
+    sum := f32(0)
+    items := module.current_input.items.([]ModuleItem)
+    for item in items {
+        bounds := [4]f32 {}
+        nanovg.TextAlign(ctx, .CENTER, .BASELINE)
+        adv := nanovg.TextBounds(ctx, 0, 0, item.text, &bounds)
+        text_width := adv
+        width := text_width + PAD*2
+        sum += width
+    }
+    return max(sum, module.min_width)
+}
+module_render :: proc(mod: ^Module, state: ^State, ctx: ^nanovg.Context, x: f32) -> f32 {
+    if mod.current_input.items == nil do return 0
+    x := x
+    for &item in mod.current_input.items.([]ModuleItem) {
+        bounds := [4]f32 {}
+        nanovg.TextAlign(ctx, .LEFT, .BASELINE)
+        adv := nanovg.TextBounds(ctx, 0, state.height, item.text, &bounds)
+        text_width := adv
+        text_height := bounds[3]-bounds[1]
+        width := text_width + PAD*2
+
+        nanovg.FillColor(ctx, nanovg.RGBA(item.bgColor.r, item.bgColor.g, item.bgColor.b,item.bgColor.a))
+        nanovg.BeginPath(ctx)
+        nanovg.Rect(ctx, x, 0, width, state.height)
+        nanovg.Fill(ctx)
+
+        nanovg.FillColor(ctx, nanovg.RGBA(item.fgColor.r, item.fgColor.g, item.fgColor.b,item.fgColor.a))
+        nanovg.Text(ctx, x + PAD, state.height + (state.height-text_height)/2 - bounds[1], item.text)
+        item.pos = x
+        item.width = width
+        x += width
+    }
+    return max(x, mod.min_width)
 }
 process_input :: proc(module: ^Module) {
     line, err := bufio.reader_read_string(&module.rd, '\n')

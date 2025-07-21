@@ -36,9 +36,7 @@ Monitor :: struct {
     mouse_handler:   MouseHandler,
     output:          ^wl.wl_output,
     name:            string,
-    //refresh_surface: bool,
     left:            []Module,
-    center:          []Module,
     right:           []Module,
     surface:         Surface,
 }
@@ -58,6 +56,7 @@ State :: struct {
     menu:        ^Menu,
     font:        []byte,
     font_size:   f32,
+    height:      f32,
 }
 MouseHandler :: struct {
     data: rawptr,
@@ -67,13 +66,11 @@ MouseHandler :: struct {
 }
 monitor_iter :: proc(using iter: ^MonitorIterator) -> (^Module, bool) {
     mods: []Module = {}
-    for idx < 3 {
+    for idx < 2 {
         switch idx {
             case 0:
                 mods = monitor.left
             case 1:
-                mods = monitor.center
-            case 2:
                 mods = monitor.right
         }
         if inner >= len(mods) {
@@ -205,7 +202,7 @@ output_mode :: proc "c" (
     context = st.ctx
     monitor := get_or_create_monitor_for_output(st, wl_output)
     monitor.surface.w = int(width)
-    monitor.surface.h = HEIGHT
+    monitor.surface.h = int(st.height)
 }
 output_done  :: proc "c" (data: rawptr, wl_output: ^wl.wl_output) {
     st := transmute(^State)data
@@ -316,7 +313,6 @@ pointer_listener: wl.wl_pointer_listener = {
         st := cast(^State)data
         btn := MouseButton(button)
         context = st.ctx
-        fmt.println("click", state)
         if state == 0 && st.mouse.handler != nil {
             st.mouse.handler.click(st.mouse.handler.data, st, btn, serial)
         }
@@ -487,7 +483,17 @@ layer_listener:  wl.zwlr_layer_surface_v1_listener = {
 
     }
 }
-HEIGHT :: 20
+prepare_poll_fds :: proc(pollfds: ^[dynamic]posix.pollfd, state: ^State) {
+    clear(pollfds)
+    append(pollfds, posix.pollfd { fd = posix.FD(state.display.fd), events = {.IN} })
+    for monitor in state.monitors {
+        mon_iter := MonitorIterator {monitor = monitor}
+        for mod in monitor_iter(&mon_iter) {
+            mod.pollfd_index = len(pollfds)
+            append(pollfds, posix.pollfd { fd = mod.pipe_out[0], events = {.IN, .OUT} })
+        }
+    }
+}
 PAD :: 3.5
 main :: proc() {
     state: State = {}
@@ -502,6 +508,7 @@ main :: proc() {
         fmt.eprintln("ERROR:", os_err)
         os.exit(1)
     }
+    state.height = cfg.height
     state.font = fontdata
     state.font_size = cfg.font_size
     color_ok := false
@@ -522,7 +529,7 @@ main :: proc() {
     wl.display_roundtrip(display)
     fmt.println(len(state.monitors), "outputs")
 
-    state.rctx = render.init_egl(display)
+    state.rctx = init_egl(display)
     gl.load_up_to(int(4), 5, egl.gl_set_proc_address)
     for monitor in state.monitors {
         surface_init(&monitor.surface, monitor.output, &state, monitor.surface.w, monitor.surface.h)
@@ -543,27 +550,30 @@ main :: proc() {
     for output, out_config in cfg.outputs {
         monitor := get_monitor_by_name(&state, output) 
         if monitor == nil do fmt.eprintln("WARN: No output", output)
-        left := make([dynamic]Module)
-        for module in out_config.modules_left {
-            mod_cfg, ok := cfg.modules[module]
-            if !ok { 
-                fmt.eprintln("ERROR: No module", module)
-                continue
+        init_modules :: proc(modules_out: ^[]Module, cfg: ^Config, modules: []string) {
+            mods := make([dynamic]Module)
+            for module in modules {
+                mod_cfg, ok := cfg.modules[module]
+                if !ok { 
+                    fmt.eprintln("ERROR: No module", module)
+                    continue
+                }
+                append(&mods, Module {
+                    exec      = mod_cfg.exec,
+                    clickable = mod_cfg.clickable,
+                    min_width = mod_cfg.min_width,
+                })
             }
-            fmt.println(mod_cfg)
-            append(&left, Module {
-                exec      = mod_cfg.exec,
-                clickable = mod_cfg.clickable,
-            })
+            modules_out ^= mods[:]
+            for &mod in modules_out^ {
+                err := run_module(&mod)
+                if err != nil do fmt.eprintln("ERROR: Failed to run module", mod.exec)
+            }
         }
-        monitor.left = left[:]
-        for &mod in monitor.left {
-            err := run_module(&mod)
-            if err != nil do fmt.eprintln("ERROR: Failed to run module", mod.exec)
-        }
+        init_modules(&monitor.left, cfg, out_config.modules_left)
+        init_modules(&monitor.right, cfg, out_config.modules_right)
     }
     pollfds := make([dynamic]posix.pollfd)
-    counter := 100
     wl.display_roundtrip(display)
     for {
         if state.menu != nil && state.menu.rerender {
@@ -581,7 +591,7 @@ main :: proc() {
                     return
                 }
                 {
-                    gl.ClearColor(0,0,0,1)
+                    gl.ClearColor(f32(state.bg.r)/255.0, f32(state.bg.g)/255.0, f32(state.bg.b)/255.0, f32(state.bg.a)/255.0)
                     gl.Clear(gl.COLOR_BUFFER_BIT)
                     gl.Viewport(0, 0, i32(monitor.surface.w), i32(monitor.surface.h))
                     ctx := monitor.surface.nvg_ctx
@@ -589,36 +599,32 @@ main :: proc() {
                     defer nanovg.EndFrame(ctx)
                     nanovg.FontSize(ctx, state.font_size)
                     nanovg.FontFaceId(ctx, 0)
-                    asc, desc, _ := nanovg.TextMetrics(ctx)
                     x := f32(0)
-                    for mod in monitor.left {
+                    for &mod, i in monitor.left {
                         if mod.current_input.items == nil do continue
-                        for &item in mod.current_input.items.([]ModuleItem) {
-
-                            bounds := [4]f32 {}
-                            nanovg.TextAlign(ctx, .LEFT, .BASELINE)
-                            adv := nanovg.TextBounds(ctx, 0, HEIGHT, item.text, &bounds)
-                            text_width := adv
-                            text_height := bounds[3]-bounds[1]
-                            width := text_width + PAD*2
-
-                            nanovg.FillColor(ctx, nanovg.RGBA(item.bgColor.r, item.bgColor.g, item.bgColor.b,item.bgColor.a))
+                        x = module_render(&mod, &state, ctx, x)
+                        if i != len(monitor.left) - 1 {
                             nanovg.BeginPath(ctx)
-                            nanovg.Rect(ctx, x, 0, width, HEIGHT)
+                            nanovg.FillColor(ctx, nanovg.RGBA(255,255,255,255))
+                            nanovg.Rect(ctx, x, 0, 1, state.height)
                             nanovg.Fill(ctx)
-
-                            nanovg.FillColor(ctx, nanovg.RGBA(item.fgColor.r, item.fgColor.g, item.fgColor.b,item.fgColor.a))
-                            nanovg.Text(ctx, x + PAD, HEIGHT + (HEIGHT-text_height)/2 - bounds[1], item.text)
-                            item.pos = x
-                            item.width = width
-                            x += width
+                            x+=2
                         }
-                        nanovg.BeginPath(ctx)
-                        nanovg.FillColor(ctx, nanovg.RGBA(255,255,255,255))
-                        nanovg.Rect(ctx, x, 0, 1, HEIGHT)
-                        nanovg.Fill(ctx)
-                        x+=2
                     }
+                    x = f32(monitor.surface.w)
+                    #reverse for &mod, i in monitor.right {
+                        x -= calculate_width(&mod, ctx)
+                        module_render(&mod, &state, ctx, x)
+                        if i != 0 {
+                            x-=2
+                            nanovg.BeginPath(ctx)
+                            nanovg.FillColor(ctx, nanovg.RGBA(255,255,255,255))
+                            nanovg.Rect(ctx, x, 0, 1, state.height)
+                            nanovg.Fill(ctx)
+                        }
+                    }
+                    
+                    
                 }
 
 
@@ -629,17 +635,8 @@ main :: proc() {
                 wl.display_flush(display)
             }
         }
-        clear(&pollfds)
-        display_poll_fd := len(pollfds)
-        append(&pollfds, posix.pollfd { fd = posix.FD(display.fd), events = {.IN} })
-        for monitor in state.monitors {
-            mon_iter := MonitorIterator {monitor = monitor}
-            for mod in monitor_iter(&mon_iter) {
-                mod.pollfd_index = len(pollfds)
-                append(&pollfds, posix.pollfd { fd = mod.pipe_out[0], events = {.IN, .OUT} })
-            }
-        }
 
+        prepare_poll_fds(&pollfds, &state)
         res := posix.poll(slice.as_ptr(pollfds[:]), u32(len(pollfds)), -1)
 
         for monitor in state.monitors {
@@ -654,8 +651,9 @@ main :: proc() {
                 }
             }
         }
-        if .IN in pollfds[display_poll_fd].revents {
+        if .IN in pollfds[0].revents {
             wl.display_dispatch(display)
         }
     }
 }
+

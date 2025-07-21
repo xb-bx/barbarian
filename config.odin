@@ -4,12 +4,12 @@ import "core:encoding/json"
 
 OutputConfig :: struct {
     modules_left:   []string, 
-    modules_center: []string,
     modules_right:  []string,
 }
 ModuleConfig :: struct {
     exec:      []string,
     clickable: bool,
+    min_width: f32,
 }
 Config :: struct {
     outputs:    map[string]OutputConfig,
@@ -18,6 +18,7 @@ Config :: struct {
     foreground: string,
     font:       string,
     font_size:  f32,
+    height:     f32,
 }
 ConfigError :: union #shared_nil {
     os.Error,
