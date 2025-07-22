@@ -10,6 +10,12 @@ import "core:io"
 import "core:os"
 import "core:fmt"
 import "vendor:nanovg"
+foreign import clib "system:c"
+PR_SET_PDEATHSIG :: 1
+@(default_calling_convention = "c")
+foreign clib {
+    prctl :: proc(op: i32, var: i32) --- 
+}
 Color :: struct {
     r: u8,
     g: u8,
@@ -85,6 +91,7 @@ run_module :: proc(module: ^Module) -> posix.Errno {
     pipe(&module.pipe_out) or_return
     pid := fork() or_return
     if pid == 0 {
+        prctl(PR_SET_PDEATHSIG, i32(posix.Signal.SIGTERM))
         posix.close(module.pipe_in[1])
         posix.close(module.pipe_out[0])
         posix.dup2(module.pipe_in[0], posix.FD(0))
