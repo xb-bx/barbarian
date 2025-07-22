@@ -7,8 +7,10 @@ import "core:c"
 import "core:strings"
 import "core:os"
 import "core:time"
+import "core:time/datetime"
 import "core:c/libc"
 import "core:fmt"
+import "core:flags"
 import "core:slice"
 import "wayland-odin/render"
 import "wayland-odin/utils"
@@ -495,10 +497,15 @@ prepare_poll_fds :: proc(pollfds: ^[dynamic]posix.pollfd, state: ^State) {
     }
 }
 PAD :: 3.5
+CliOpts :: struct {
+    config_path: string `usage:"Set config path"`,
+} 
 main :: proc() {
+    opts: CliOpts = {}
+    flags.parse_or_exit(&opts, os.args, .Unix)
     state: State = {}
     state.ctx = context
-    cfg, err := load_config()
+    cfg, err := load_config(opts.config_path)
     if err != nil {
         fmt.eprintln("ERROR:", err)
         os.exit(1)
