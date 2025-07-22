@@ -70,8 +70,8 @@ Module :: struct {
     exec:            []string,
     clickable:       bool,
     current_input:   ModuleInput,
-    pipe_in:         [2]posix.FD,
-    pipe_out:        [2]posix.FD,
+    pipe_in:         posix.FD,
+    pipe_out:        posix.FD,
     rd:              bufio.Reader,
     redraw:          bool,
     pollfd_index:    int,
@@ -87,29 +87,34 @@ pipe :: proc(fdes: ^[2]posix.FD) -> posix.Errno {
     return nil
 }
 run_module :: proc(module: ^Module) -> posix.Errno {
-    pipe(&module.pipe_in) or_return
-    pipe(&module.pipe_out) or_return
+    pipes_in: [2]posix.FD = {}
+    pipes_out: [2]posix.FD = {}
+    pipe(&pipes_in) or_return
+    pipe(&pipes_out) or_return
+
+    module.pipe_in  = pipes_in[1]
+    module.pipe_out = pipes_out[0]
+
     pid := fork() or_return
     if pid == 0 {
         prctl(PR_SET_PDEATHSIG, i32(posix.Signal.SIGTERM))
-        posix.close(module.pipe_in[1])
-        posix.close(module.pipe_out[0])
-        posix.dup2(module.pipe_in[0], posix.FD(0))
-        posix.dup2(module.pipe_out[1], posix.FD(1))
+        posix.close(pipes_in[1])
+        posix.close(pipes_out[0])
+        posix.dup2(pipes_in[0], posix.FD(0))
+        posix.dup2(pipes_out[1], posix.FD(1))
         cstrings := make([]cstring, len(module.exec))
         for str,i in module.exec do cstrings[i] = strings.clone_to_cstring(str)
         posix.execvp(cstrings[0], slice.as_ptr(cstrings))
         posix.exit(1)
     } else {
-        posix.close(module.pipe_in[0])
-        posix.close(module.pipe_out[1])
+        posix.close(pipes_in[0])
+        posix.close(pipes_out[1])
         module.pid = pid
     }
-    posix.fcntl(module.pipe_in[1], .SETFL, posix.fcntl(module.pipe_in[1], .GETFL, 0) | posix.O_NONBLOCK)
-    bufio.reader_init(&module.rd, os.stream_from_handle(os.Handle(module.pipe_out[0])))
+    posix.fcntl(pipes_in[1], .SETFL, posix.fcntl(pipes_in[1], .GETFL, 0) | posix.O_NONBLOCK)
+    bufio.reader_init(&module.rd, os.stream_from_handle(os.Handle(pipes_out[0])))
     return nil
 }
-EMPTY_ITEMS := []string { "THERE IS NOTHING HERE" }
 hex_to_color :: proc(hex: string) -> (Color, bool) {
     if len(hex) < 8 do return {}, false
     res := Color {}
@@ -147,7 +152,7 @@ send_event :: proc(module: ^Module, event: ModuleEvent) {
     if err != nil { fmt.eprintln(err); panic("err") }
     strings.write_rune(&b, '\n')
 
-    res := posix.write(module.pipe_in[1], slice.as_ptr(b.buf[:]), len(b.buf))
+    res := posix.write(module.pipe_in, slice.as_ptr(b.buf[:]), len(b.buf))
     if res == -1 {
         fmt.eprintln("WARN: Could not send event to module", posix.errno())
     }
@@ -169,7 +174,9 @@ calculate_width :: proc(module: ^Module, ctx: ^nanovg.Context) -> f32 {
 module_render :: proc(mod: ^Module, state: ^State, ctx: ^nanovg.Context, x: f32) -> f32 {
     if mod.current_input.items == nil do return 0
     x := x
-    for &item in mod.current_input.items.([]ModuleItem) {
+    items := &mod.current_input.items.([]ModuleItem)
+    for _, i in items {
+        item := &items[i]
         bounds := [4]f32 {}
         nanovg.TextAlign(ctx, .LEFT, .BASELINE)
         adv := nanovg.TextBounds(ctx, 0, state.height, item.text, &bounds)
@@ -185,6 +192,7 @@ module_render :: proc(mod: ^Module, state: ^State, ctx: ^nanovg.Context, x: f32)
         nanovg.FillColor(ctx, nanovg.RGBA(item.fgColor.r, item.fgColor.g, item.fgColor.b,item.fgColor.a))
         nanovg.Text(ctx, x + PAD, state.height + (state.height-text_height)/2 - bounds[1], item.text)
         item.pos = x
+        
         item.width = width
         x += width
     }
@@ -214,12 +222,12 @@ process_input :: proc(module: ^Module, state: ^State) {
             ok := false
             item.fgColor, ok = hex_to_color(item.fg)
             if !ok {
-                fmt.eprintln("WARN: received invalid color", item.fg)
+                if item.fg != "" do fmt.eprintln("WARN: received invalid color", item.fg)
                 item.fgColor = state.fg
             } 
             item.bgColor, ok = hex_to_color(item.bg)
             if !ok {
-                fmt.eprintln("WARN: received invalid color", item.bg)
+                if item.bg != "" do fmt.eprintln("WARN: received invalid color", item.bg)
                 item.bgColor = state.bg
             } 
         } 
@@ -236,5 +244,8 @@ process_input :: proc(module: ^Module, state: ^State) {
     if input.tooltip != nil {
         if module.current_input.tooltip != nil do delete(module.current_input.tooltip.(string))
         module.current_input.tooltip = input.tooltip
+        if state.tooltip != nil && state.tooltip.module == module {
+            tooltip_update_text(state.tooltip, input.tooltip.(string), state.monitors[0].surface.nvg_ctx)
+        }
     }
 } 

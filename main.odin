@@ -29,19 +29,6 @@ Mouse :: struct {
     pos_y:  f32,
     handler: ^MouseHandler,
 }
-MonitorIterator :: struct {
-    monitor: ^Monitor,
-    idx: int,
-    inner: int,
-}
-Monitor :: struct {
-    mouse_handler:   MouseHandler,
-    output:          ^wl.wl_output,
-    name:            string,
-    left:            []Module,
-    right:           []Module,
-    surface:         Surface,
-}
 State :: struct {
     display:     ^wl.wl_display,
     compositor:  ^wl.wl_compositor,
@@ -59,114 +46,13 @@ State :: struct {
     font:        []byte,
     font_size:   f32,
     height:      f32,
+    tooltip:     ^Tooltip,
 }
 MouseHandler :: struct {
     data: rawptr,
     motion: proc(data: rawptr, state: ^State, pos_x: f32, pos_y: f32),
     click: proc(data: rawptr, state: ^State, btn: MouseButton, serial: u32),
     scroll: proc(data: rawptr, state: ^State, dir: int),
-}
-monitor_iter :: proc(using iter: ^MonitorIterator) -> (^Module, bool) {
-    mods: []Module = {}
-    for idx < 2 {
-        switch idx {
-            case 0:
-                mods = monitor.left
-            case 1:
-                mods = monitor.right
-        }
-        if inner >= len(mods) {
-            idx += 1
-            inner = 0
-            continue
-        }
-        inner += 1
-        return &mods[inner - 1], true
-    }
-    return nil, false
-}
-monitor_mouse_motion :: proc(data: rawptr, state: ^State, pos_x: f32, pos_y: f32) {
-}
-monitor_mouse_scroll :: proc(data: rawptr, state: ^State, dir: int) {
-    mon := cast(^Monitor)data
-    mod_iter := MonitorIterator { monitor = mon }  
-    res_mod: ^Module = nil
-    item_index := -1
-    for mod in monitor_iter(&mod_iter) {
-        if mod.current_input.items == nil do continue
-        items := mod.current_input.items.([]ModuleItem)
-        for item, i in items {
-            if state.mouse.pos_x >= item.pos && state.mouse.pos_x <= item.pos + item.width {
-                item_index = i 
-                res_mod = mod
-                break
-            }
-        }
-        if res_mod != nil do break
-    }
-    if res_mod != nil {
-        send_event(res_mod, ModuleEvent { type = .Scroll, scroll = ScrollEvent { dir = dir }})
-    }
-}
-monitor_mouse_click :: proc(data: rawptr, state: ^State, btn: MouseButton, serial: u32) {
-    mon := cast(^Monitor)data
-    menu_close(state)
-    mod_iter := MonitorIterator { monitor = mon }  
-    res_mod: ^Module = nil
-    item_index := -1
-    for mod in monitor_iter(&mod_iter) {
-        if mod.current_input.items == nil do continue
-        items := mod.current_input.items.([]ModuleItem)
-        for item, i in items {
-            if state.mouse.pos_x >= item.pos && state.mouse.pos_x <= item.pos + item.width {
-                item_index = i 
-                res_mod = mod
-                break
-            }
-        }
-        if res_mod != nil do break
-    }
-    if res_mod != nil {
-        if res_mod.current_input.menu != nil && res_mod.current_input.menu.(ModuleMenu).open_on == btn {
-            state.menu = new(Menu)
-            menu := res_mod.current_input.menu.(ModuleMenu)
-            menu_init(state.menu, state, mon, menu, proc(data: rawptr, index: int) {
-                mod := cast(^Module)data
-                item := mod.current_input.menu.(ModuleMenu).items[index]   
-                send_event(mod, { type = .Menu, menu = MenuEvent { key = item.key } })
-            }, res_mod, mon.surface.nvg_ctx)
-            wl.xdg_popup_grab(state.menu.surface.xdg_popup, state.seat, serial)
-        } else {
-            if res_mod.clickable {
-                send_event(res_mod, { type = .Click, click = ClickEvent { button = btn, item = item_index } })
-            }
-        }
-    }
-}
-get_monitor_by_name :: proc(st: ^State, name: string) -> ^Monitor {
-    for mon in st.monitors do if mon.name == name do return mon
-    return nil
-}
-get_monitor_by_surface :: proc(st: ^State, surface: ^wl.wl_surface) -> ^Monitor {
-    context.user_ptr = surface
-    i, found := slice.linear_search_proc(st.monitors[:], proc(x: ^Monitor) -> bool { return context.user_ptr == x.surface.wl_surface })
-    if found do return st.monitors[i]
-    return nil
-}
-get_or_create_monitor_for_output :: proc(st: ^State, output: ^wl.wl_output) -> ^Monitor {
-    context.user_ptr = output
-    i, found := slice.linear_search_proc(st.monitors[:], proc(x: ^Monitor) -> bool { return context.user_ptr == x.output })
-    if found do return st.monitors[i]
-    mon := new(Monitor)
-    mon.mouse_handler = {
-        data = mon,
-        motion = monitor_mouse_motion,
-        click = monitor_mouse_click,
-        scroll = monitor_mouse_scroll,
-    }
-    mon.output = output
-    append(&st.monitors, mon)
-    return mon
 }
 
 pixel :: struct {
@@ -271,7 +157,6 @@ pointer_listener: wl.wl_pointer_listener = {
         state: ^State = cast(^State)data
         context = state.ctx
         mon := get_monitor_by_surface(state, surface)
-        //assert(mon != nil)
         if mon != nil {
             state.mouse.handler = &mon.mouse_handler
         } else {
@@ -290,6 +175,8 @@ pointer_listener: wl.wl_pointer_listener = {
         state: ^State = cast(^State)data
         context = state.ctx
         state.mouse.handler = nil
+        tooltip_destroy(state.tooltip, state)
+        state.tooltip = nil
     },
     motion = proc "c" (
         data: rawptr,
@@ -492,7 +379,7 @@ prepare_poll_fds :: proc(pollfds: ^[dynamic]posix.pollfd, state: ^State) {
         mon_iter := MonitorIterator {monitor = monitor}
         for mod in monitor_iter(&mon_iter) {
             mod.pollfd_index = len(pollfds)
-            append(pollfds, posix.pollfd { fd = mod.pipe_out[0], events = {.IN, .OUT} })
+            append(pollfds, posix.pollfd { fd = mod.pipe_out, events = {.IN, .OUT} })
         }
     }
 }
@@ -591,6 +478,15 @@ main :: proc() {
             wl.display_flush(display)
             wl.display_dispatch_pending(display)
         }
+        if state.tooltip != nil && (state.tooltip.rerender || !state.tooltip.displayed) && tooltip_get_time_to_show(state.tooltip) <= 0 {
+            tooltip_render(state.tooltip, &state)
+            egl.SwapBuffers(state.rctx.display, state.tooltip.surface.egl_surface)
+            wl.wl_surface_damage_buffer(state.tooltip.surface.wl_surface, 0, 0, i32(state.tooltip.surface.w), i32(state.tooltip.surface.h))
+            wl.wl_surface_commit(state.tooltip.surface.wl_surface)
+            wl.display_flush(display)
+            wl.display_dispatch_pending(display)
+
+        }
         for monitor in state.monitors {
             if monitor.surface.redraw {
                 if (!egl.MakeCurrent(state.rctx.display, monitor.surface.egl_surface, monitor.surface.egl_surface, state.rctx.ctx)) {
@@ -644,7 +540,12 @@ main :: proc() {
         }
 
         prepare_poll_fds(&pollfds, &state)
-        res := posix.poll(slice.as_ptr(pollfds[:]), u32(len(pollfds)), -1)
+        timeout := i32(-1)
+        if state.tooltip != nil {
+            timeout = tooltip_get_time_to_show(state.tooltip)
+            if timeout < 0 do timeout = -1
+        }
+        res := posix.poll(slice.as_ptr(pollfds[:]), u32(len(pollfds)), timeout)
 
         for monitor in state.monitors {
             mon_iter := MonitorIterator {monitor = monitor}
