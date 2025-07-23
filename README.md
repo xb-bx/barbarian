@@ -59,3 +59,20 @@ Look for examples in [./example-modules](https://github.com/xb-bx/barbarian/tree
 ## TODO:
 - [ ] Test multiple monitors
 - [ ] Scaling
+
+
+# Installation
+## Arch-based distros
+```sh
+git clone https://github.com/xb-bx/barbarian
+cd barbarian
+makepkg -si
+```
+
+## Other
+```sh
+git clone https://github.com/xb-bx/barbarian --recursive
+sudo make install
+```
+
+
