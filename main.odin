@@ -394,12 +394,12 @@ main :: proc() {
     state.ctx = context
     cfg, err := load_config(opts.config_path)
     if err != nil {
-        fmt.eprintln("ERROR:", err)
+        fmt.eprintln("ERROR while loading config:", err)
         os.exit(1)
     }
     fontdata, os_err := os.read_entire_file_or_err(cfg.font)
     if os_err != nil {
-        fmt.eprintln("ERROR:", os_err)
+        fmt.eprintln("ERROR while loading font:", os_err)
         os.exit(1)
     }
     state.height = cfg.height
