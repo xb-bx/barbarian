@@ -1,4 +1,6 @@
 # BARbarian - simple wayland bar
+### Demo 
+![demo.png](https://github.com/xb-bx/barbarian/blob/master/demo.png?raw=true)
 ### Configuration
 The bar looks for $XDG_CONFIG_HOME/barbarian/config.json5 or $HOME/.config/barbarian/config.json5
 [example config](https://github.com/xb-bx/barbarian/tree/master/config.json5)
@@ -54,3 +56,6 @@ Example module input:
 }
 ```
 Look for examples in [./example-modules](https://github.com/xb-bx/barbarian/tree/master/example-modules)
+## TODO:
+- [ ] Test multiple monitors
+- [ ] Scaling

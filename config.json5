@@ -1,12 +1,12 @@
 {
-    background: "00000022",
+    background: "000000ff",
     foreground: "ffffffff",
     font: "/usr/share/fonts/TTF/LiterationSansNerdFont-Regular.ttf",
     font_size: 15, 
     height: 20,
     outputs: {
         "HDMI-A-1": {
-            modules_left: ["sway.workspaces", "datetime", "weather"],
+            modules_left: ["sway.workspaces", "datetime"],
             modules_right: ["sway.language", "network-speed", "sway.language"],
         }
     }, 
