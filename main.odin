@@ -42,6 +42,10 @@ State :: struct {
     mouse:       Mouse,
     bg:          Color,
     fg:          Color,
+    tooltip_bg:  Color,
+    tooltip_fg:  Color,
+    menu_bg:     Color,
+    menu_fg:     Color,
     menu:        ^Menu,
     font:        []byte,
     font_size:   f32,
@@ -410,6 +414,18 @@ main :: proc() {
     if !color_ok do state.bg = Color { 0, 0, 0, 0xFF }
     state.fg, color_ok = hex_to_color(cfg.foreground)
     if !color_ok do state.fg = Color { 0xFF, 0xFF, 0xFF, 0xFF }
+
+    state.tooltip_bg, color_ok = hex_to_color(cfg.tooltip_background)
+    if !color_ok do state.tooltip_bg = state.bg
+    state.tooltip_fg, color_ok = hex_to_color(cfg.tooltip_foreground)
+    if !color_ok do state.tooltip_fg = state.fg
+
+    state.menu_bg, color_ok = hex_to_color(cfg.menu_background)
+    if !color_ok do state.menu_bg = state.bg
+    state.menu_fg, color_ok = hex_to_color(cfg.menu_foreground)
+    if !color_ok do state.menu_fg = state.fg
+
+
     display := wl.display_connect(nil)
     state.display = display
     registry := wl.wl_display_get_registry(display)

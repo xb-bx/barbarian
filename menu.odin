@@ -87,7 +87,7 @@ menu_render :: proc(menu: ^Menu) {
         return
     }
     state := menu.state
-    gl.ClearColor(f32(state.bg.r)/255.0, f32(state.bg.g)/255.0, f32(state.bg.b)/255.0, f32(state.bg.a)/255.0)
+    gl.ClearColor(f32(state.menu_bg.r)/255.0, f32(state.menu_bg.g)/255.0, f32(state.menu_bg.b)/255.0, f32(state.menu_bg.a)/255.0)
     gl.Clear(gl.COLOR_BUFFER_BIT)
     gl.Viewport(0, 0, i32(menu.surface.w), i32(menu.surface.h))
     nanovg.BeginFrame(ctx ,f32(menu.surface.w), f32(menu.surface.h), 1)
@@ -97,15 +97,15 @@ menu_render :: proc(menu: ^Menu) {
     nanovg.FontSize(ctx, menu.state.font_size)
     nanovg.FontFace(ctx, "sans")
     for item,i in menu.items.items {
-        text_color := to_nvg_color(menu.state.fg)
-        bg_color   := to_nvg_color(menu.state.bg)
+        text_color := to_nvg_color(menu.state.menu_fg)
+        bg_color   := to_nvg_color(menu.state.menu_bg)
         bounds := [4]f32{}
         nanovg.TextBounds(ctx, 0, menu.item_height, item.value, &bounds)
         text_height := bounds[3] - bounds[1]
 
         if i == menu.hovered_item {
-            text_color = to_nvg_color(menu.state.bg)
-            bg_color   = to_nvg_color(menu.state.fg)
+            text_color = to_nvg_color(menu.state.menu_bg)
+            bg_color   = to_nvg_color(menu.state.menu_fg)
         } 
         nanovg.FillColor(ctx, bg_color)
 

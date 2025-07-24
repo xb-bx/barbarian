@@ -1,6 +1,10 @@
 {
     background: "000000ff",
     foreground: "ffffffff",
+    tooltip_background: "000000ff",
+    tooltip_foreground: "ffffffff",
+    menu_background: "000000ff",
+    menu_foreground: "ffffffff",
     font: "/usr/share/fonts/TTF/LiterationSansNerdFont-Regular.ttf",
     font_size: 15, 
     height: 20,
@@ -12,18 +16,18 @@
     }, 
     modules: {
         "sway.workspaces": {
-            exec: ["sway-workspaces.py"]
+            exec: ["./example-modules/sway-workspaces.py"]
             clickable: true,
         },
         "datetime": {
-            exec: ["datetime.sh"]
+            exec: ["./example-modules/datetime.sh"]
             clickable: true,
         },
         "sway.language": {
-            exec: ["sway-language.sh"]
+            exec: ["./example-modules/sway-language.sh"]
         },
         "network-speed": {
-            exec: ["network-speed.py"]
+            exec: ["./example-modules/network-speed.py"]
             min_width: 80,
         },
     },

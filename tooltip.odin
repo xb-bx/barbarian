@@ -55,7 +55,7 @@ tooltip_render :: proc(tooltip: ^Tooltip, state: ^State) {
         fmt.println("Error making current!")
         return
     }
-    gl.ClearColor(f32(state.bg.r)/255.0, f32(state.bg.g)/255.0, f32(state.bg.b)/255.0, 1)
+    gl.ClearColor(f32(state.tooltip_bg.r)/255.0, f32(state.tooltip_bg.g)/255.0, f32(state.tooltip_bg.b)/255.0, 1)
     gl.Clear(gl.COLOR_BUFFER_BIT)
     gl.Viewport(0, 0, i32(tooltip.surface.w), i32(tooltip.surface.h))
     {
@@ -63,14 +63,26 @@ tooltip_render :: proc(tooltip: ^Tooltip, state: ^State) {
         defer nanovg.EndFrame(ctx)
         nanovg.BeginPath(ctx)
         nanovg.Rect(ctx, 0, 0, width, height)
-        nanovg.StrokeColor(ctx, to_nvg_color(state.fg))
+        nanovg.StrokeColor(ctx, to_nvg_color(state.tooltip_fg))
         nanovg.StrokeWidth(ctx, 2)
         nanovg.Stroke(ctx)
 
         nanovg.FontSize(ctx, state.font_size)
         nanovg.TextAlign(ctx, .LEFT, .BASELINE)
-        text_pos_y := height + (height-tooltip.text_height)/2 + tooltip.text_baseline
-        nanovg.Text(ctx, TOOLTIP_PAD, text_pos_y, tooltip.text)
+        lines := strings.count(tooltip.text, "\n") + 1
+
+        text := tooltip.text
+        rows: []nanovg.Text_Row = make([]nanovg.Text_Row, lines)
+        defer delete(rows)
+        nrows, last, ok := nanovg.TextBreakLines(ctx, &text, TOOLTIP_MAX_WIDTH, &rows)
+        pos := f32(TOOLTIP_PAD)
+        for row,i in rows[:nrows] {
+            line := tooltip.text[row.start:row.end]
+            bounds := [4]f32{}
+            nanovg.TextBounds(ctx, 0, 0, line, &bounds)
+            pos -= bounds[1]
+            nanovg.Text(ctx, TOOLTIP_PAD, pos, tooltip.text[row.start:row.end])
+        }
     }
 }
 tooltip_get_time_to_show :: proc(tooltip: ^Tooltip) -> i32 {
