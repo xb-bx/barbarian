@@ -157,7 +157,7 @@ send_event :: proc(module: ^Module, event: ModuleEvent) {
         fmt.eprintln("WARN: Could not send event to module", posix.errno())
     }
 }
-calculate_width :: proc(module: ^Module, ctx: ^nanovg.Context) -> f32 {
+calculate_width :: proc(module: ^Module, ctx: ^nanovg.Context, ignore_min: bool = false) -> f32 {
     if module.current_input.items == nil do return 0
     sum := f32(0)
     items := module.current_input.items.([]ModuleItem)
@@ -169,11 +169,16 @@ calculate_width :: proc(module: ^Module, ctx: ^nanovg.Context) -> f32 {
         width := text_width + PAD*2
         sum += width
     }
+    if ignore_min do return sum
     return max(sum, module.min_width)
 }
 module_render :: proc(mod: ^Module, state: ^State, ctx: ^nanovg.Context, x: f32) -> f32 {
     if mod.current_input.items == nil do return 0
+    calced_width := calculate_width(mod, ctx, true)
     x := x
+    if calced_width < mod.min_width {
+        x += (mod.min_width - calced_width) /  2    
+    }
     items := &mod.current_input.items.([]ModuleItem)
     for _, i in items {
         item := &items[i]
