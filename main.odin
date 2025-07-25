@@ -382,6 +382,7 @@ prepare_poll_fds :: proc(pollfds: ^[dynamic]posix.pollfd, state: ^State) {
     for monitor in state.monitors {
         mon_iter := MonitorIterator {monitor = monitor}
         for mod in monitor_iter(&mon_iter) {
+            if mod.stopped do continue
             mod.pollfd_index = len(pollfds)
             append(pollfds, posix.pollfd { fd = mod.pipe_out, events = {.IN, .OUT} })
         }
@@ -562,12 +563,17 @@ main :: proc() {
             if timeout < 0 do timeout = -1
         }
         res := posix.poll(slice.as_ptr(pollfds[:]), u32(len(pollfds)), timeout)
-
+        stat := i32(0)
+        pid := posix.waitpid(-1, &stat, { .NOHANG })
         for monitor in state.monitors {
             mon_iter := MonitorIterator {monitor = monitor}
             for mod in monitor_iter(&mon_iter) {
                 if .IN in pollfds[mod.pollfd_index].revents {
                     process_input(mod, &state)
+                }
+                if .HUP in pollfds[mod.pollfd_index].revents || mod.pid == pid {
+                    fmt.printfln("module(PID %i) %v died", pid, mod.exec)
+                    mod.stopped = true
                 }
                 if mod.redraw {
                     mod.redraw = false
