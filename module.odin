@@ -76,6 +76,7 @@ Module :: struct {
     redraw:          bool,
     pollfd_index:    int,
     min_width:       f32,
+    stopped:         bool,
 }
 fork :: proc() -> (posix.pid_t, posix.Errno) {
     res := posix.fork()
@@ -94,10 +95,11 @@ run_module :: proc(module: ^Module) -> posix.Errno {
 
     module.pipe_in  = pipes_in[1]
     module.pipe_out = pipes_out[0]
-
+    pgid := posix.getpgid(0)
     pid := fork() or_return
     if pid == 0 {
         prctl(PR_SET_PDEATHSIG, i32(posix.Signal.SIGTERM))
+        posix.setpgid(pid, pgid)
         posix.close(pipes_in[1])
         posix.close(pipes_out[0])
         posix.dup2(pipes_in[0], posix.FD(0))

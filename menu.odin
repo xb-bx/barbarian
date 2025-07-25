@@ -125,8 +125,6 @@ menu_close :: proc(state: ^State) {
         menu_destroy(state.menu)
         free(state.menu)
         state.menu = nil
-        wl.display_flush(state.display)
-        wl.display_dispatch_pending(state.display)
     }
 }
 menu_destroy :: proc(menu: ^Menu) {

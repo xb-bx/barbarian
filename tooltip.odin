@@ -29,8 +29,6 @@ tooltip_destroy :: proc(tooltip: ^Tooltip, state: ^State) {
     if tooltip.displayed {
         nvgl.Destroy(tooltip.surface.nvg_ctx)
         surface_destroy(&tooltip.surface)
-        wl.display_flush(state.display)
-        wl.display_dispatch_pending(state.display)
     }
     free(tooltip)
 }
