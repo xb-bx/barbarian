@@ -191,9 +191,11 @@ pointer_listener: wl.wl_pointer_listener = {
     ) {
         state: ^State = cast(^State)data
         context = state.ctx
-        state.mouse.pos_x = f32(wl_fixed_to_double(surface_x))
-        state.mouse.pos_y = f32(wl_fixed_to_double(surface_y))
-        state.mouse.handler.motion(state.mouse.handler.data, state, state.mouse.pos_x, state.mouse.pos_y)
+        if state.mouse.handler != nil {
+            state.mouse.pos_x = f32(wl_fixed_to_double(surface_x))
+            state.mouse.pos_y = f32(wl_fixed_to_double(surface_y))
+            state.mouse.handler.motion(state.mouse.handler.data, state, state.mouse.pos_x, state.mouse.pos_y)
+        }
     },
     button = proc "c" (
         data: rawptr,
