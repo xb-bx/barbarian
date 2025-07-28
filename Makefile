@@ -5,7 +5,9 @@ debug-barbarian: ./barbarian
 
 DESTDIR ?= /
 .PHONY: install
-install: 
+.PHONY: release
+release: 
 	odin build . -o:speed -out:./barbarian
+install: 
 	mkdir -p "$(DESTDIR)usr/bin"
 	install -Dm755 barbarian "${DESTDIR}usr/bin/barbarian"
