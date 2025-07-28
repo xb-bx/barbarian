@@ -571,13 +571,14 @@ main :: proc() {
         for monitor in state.monitors {
             mon_iter := MonitorIterator {monitor = monitor}
             for mod in monitor_iter(&mon_iter) {
-                if .IN in pollfds[mod.pollfd_index].revents {
-                    fmt.println("update module", mod.exec)
-                    process_input(mod, &state)
-                }
                 if .HUP in pollfds[mod.pollfd_index].revents || mod.pid == pid {
                     fmt.printfln("module(PID %i) %v died", pid, mod.exec)
                     mod.stopped = true
+                    mod.pollfd_index = -1
+                }
+                if .IN in pollfds[mod.pollfd_index].revents && !mod.stopped {
+                    fmt.println("update module", mod.exec)
+                    process_input(mod, &state)
                 }
                 if mod.redraw {
                     mod.redraw = false
