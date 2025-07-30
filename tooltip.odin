@@ -33,6 +33,7 @@ tooltip_destroy :: proc(tooltip: ^Tooltip, state: ^State) {
     free(tooltip)
 }
 tooltip_render :: proc(tooltip: ^Tooltip, state: ^State) {
+    tooltip.rerender = false
     ctx: ^nanovg.Context = nil 
     width  := tooltip.text_width  + TOOLTIP_PAD * 2 
     height := tooltip.text_height + TOOLTIP_PAD * 2

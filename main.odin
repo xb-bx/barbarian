@@ -1,5 +1,6 @@
 package barbarian
 
+import "core:bufio"
 import "core:mem"
 import "core:encoding/json"
 import "core:math"
@@ -348,12 +349,6 @@ registry_listener := wl.wl_registry_listener {
 }
 
 
-buffer_listener := wl.wl_buffer_listener {
-    release = proc "c" (data: rawptr, wl_buffer: ^wl.wl_buffer) {
-        wl.wl_buffer_destroy(wl_buffer)
-    },
-}
-
 w: int = 0
 h: int = 0
 layer_listener:  wl.zwlr_layer_surface_v1_listener = {
@@ -488,21 +483,22 @@ main :: proc() {
     }
     pollfds := make([dynamic]posix.pollfd)
     wl.display_roundtrip(display)
+    egl.SwapInterval(state.rctx.display, 1)
     for {
-        if state.menu != nil && state.menu.rerender {
-            menu_render(state.menu)
-            egl.SwapBuffers(state.rctx.display, state.menu.surface.egl_surface)
-            wl.wl_surface_damage_buffer(state.menu.surface.wl_surface, 0, 0, i32(state.menu.surface.w), i32(state.menu.surface.h))
-            wl.wl_surface_commit(state.menu.surface.wl_surface)
+        if state.menu != nil {
+            if state.menu.rerender && state.menu.surface.swap {
+                menu_render(state.menu)
+                surface_swap(&state.menu.surface, &state)
+            }
         }
-        if state.tooltip != nil && (state.tooltip.rerender || !state.tooltip.displayed) && tooltip_get_time_to_show(state.tooltip) <= 0 {
-            tooltip_render(state.tooltip, &state)
-            egl.SwapBuffers(state.rctx.display, state.tooltip.surface.egl_surface)
-            wl.wl_surface_damage_buffer(state.tooltip.surface.wl_surface, 0, 0, i32(state.tooltip.surface.w), i32(state.tooltip.surface.h))
-            wl.wl_surface_commit(state.tooltip.surface.wl_surface)
+        if state.tooltip != nil {
+            if state.tooltip.rerender && tooltip_get_time_to_show(state.tooltip) <= 0  && (state.tooltip.surface.swap || !state.tooltip.displayed) {
+                tooltip_render(state.tooltip, &state)
+                surface_swap(&state.tooltip.surface, &state)
+            }
         }
         for monitor in state.monitors {
-            if monitor.surface.redraw {
+            if monitor.surface.redraw && monitor.surface.swap {
                 if (!egl.MakeCurrent(state.rctx.display, monitor.surface.egl_surface, monitor.surface.egl_surface, state.rctx.ctx)) {
                     fmt.println("Error making current!")
                     return
@@ -544,13 +540,7 @@ main :: proc() {
                     
                 }
 
-
-                if !egl.SwapBuffers(state.rctx.display, monitor.surface.egl_surface) {
-                    fmt.println("egl err", GetError())
-                }
-
-                wl.wl_surface_damage_buffer(monitor.surface.wl_surface, 0, 0, i32(monitor.surface.w), i32(monitor.surface.h))
-                wl.wl_surface_commit(monitor.surface.wl_surface)
+                surface_swap(&monitor.surface, &state)
                 monitor.surface.redraw = false
             }
         }
@@ -566,18 +556,27 @@ main :: proc() {
         if res == -1 {
             fmt.println("ERROR:", posix.strerror(posix.errno()))
         }
+        if state.tooltip != nil && !state.tooltip.displayed {
+            if tooltip_get_time_to_show(state.tooltip) <= 0 {
+                state.tooltip.rerender = true
+            }
+        }
         stat := i32(0)
         pid := posix.waitpid(-1, &stat, { .NOHANG })
         for monitor in state.monitors {
             mon_iter := MonitorIterator {monitor = monitor}
             for mod in monitor_iter(&mon_iter) {
+                if mod.stopped do continue
                 if .HUP in pollfds[mod.pollfd_index].revents || mod.pid == pid {
                     fmt.printfln("module(PID %i) %v died", pid, mod.exec)
                     mod.stopped = true
+                    posix.close(mod.pipe_out)
+                    posix.close(mod.pipe_in)
+                    bufio.reader_destroy(&mod.rd)
                     mod.pollfd_index = -1
+                    continue
                 }
-                if !mod.stopped  && .IN in pollfds[mod.pollfd_index].revents {
-                    fmt.println("update module", mod.exec)
+                if .IN in pollfds[mod.pollfd_index].revents {
                     process_input(mod, &state)
                 }
                 if mod.redraw {

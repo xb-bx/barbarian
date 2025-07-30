@@ -23,7 +23,7 @@ Surface :: struct {
     xdg_surface:   ^wl.xdg_surface,
     xdg_popup:     ^wl.xdg_popup,
     xdg_positioner:^wl.xdg_positioner,
-
+    swap:          bool,
 }
 xdg_popup_listener := wl.xdg_popup_listener {
 	configure = proc "c" (
@@ -104,6 +104,30 @@ surface_init_popup :: proc(surface: ^Surface, output: ^wl.wl_output, state: ^Sta
         os.exit(1)
     }
     wl.display_roundtrip(state.display)
+    surface.swap = true
+}
+frame_listener := wl.wl_callback_listener {
+	done = proc "c" (data: rawptr, wl_callback: ^wl.wl_callback, callback_data: c.uint32_t) {
+        wl.wl_callback_destroy(wl_callback)
+        surface := cast(^Surface)data
+        context = surface.state.ctx
+        surface.swap = true 
+    }
+}
+surface_create_frame_callback :: proc(surface: ^Surface) {
+    callback := wl.wl_surface_frame(surface.wl_surface)
+    wl.wl_callback_add_listener(callback, &frame_listener, surface)
+}
+surface_swap :: proc(surface: ^Surface, state: ^State) {
+    if (!egl.MakeCurrent(state.rctx.display, surface.egl_surface, surface.egl_surface, state.rctx.ctx)) {
+        fmt.println("Error making current!")
+        return
+    }
+    egl.SwapBuffers(state.rctx.display, surface.egl_surface)
+    surface_create_frame_callback(surface)
+    wl.wl_surface_damage_buffer(surface.wl_surface, 0, 0, i32(surface.w), i32(surface.h))
+    wl.wl_surface_commit(surface.wl_surface)
+    surface.swap = false
 }
 surface_init :: proc(surface: ^Surface, output: ^wl.wl_output, state: ^State, w: int, h: int) {
     surface.w = w
@@ -132,6 +156,7 @@ surface_init :: proc(surface: ^Surface, output: ^wl.wl_output, state: ^State, w:
         fmt.println("Error creating window surface")
         os.exit(1)
     }
+    surface.swap = true
 }
 surface_destroy :: proc(surface: ^Surface) {
     wl.wl_surface_attach(surface.wl_surface, nil, 0, 0)
