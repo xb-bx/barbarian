@@ -576,7 +576,7 @@ main :: proc() {
                     mod.stopped = true
                     mod.pollfd_index = -1
                 }
-                if .IN in pollfds[mod.pollfd_index].revents && !mod.stopped {
+                if !mod.stopped  && .IN in pollfds[mod.pollfd_index].revents {
                     fmt.println("update module", mod.exec)
                     process_input(mod, &state)
                 }
