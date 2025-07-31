@@ -13,17 +13,17 @@ ModuleConfig :: struct {
     min_width: f32,
 }
 Config :: struct {
-    outputs:    map[string]OutputConfig,
-    modules:    map[string]ModuleConfig,
-    background: string,
-    foreground: string,
+    outputs:            map[string]OutputConfig,
+    modules:            map[string]ModuleConfig,
+    background:         string,
+    foreground:         string,
     tooltip_background: string,
     tooltip_foreground: string,
-    menu_background: string,
-    menu_foreground: string,
-    font:       string,
-    font_size:  f32,
-    height:     f32,
+    menu_background:    string,
+    menu_foreground:    string,
+    font:               string,
+    font_size:          f32,
+    height:             f32,
 }
 ConfigError :: union #shared_nil {
     os.Error,

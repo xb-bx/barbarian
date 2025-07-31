@@ -11,8 +11,8 @@ import "vendor:nanovg"
 import nvgl "vendor:nanovg/gl"
 MonitorIterator :: struct {
     monitor: ^Monitor,
-    idx: int,
-    inner: int,
+    idx:     int,
+    inner:   int,
 }
 Monitor :: struct {
     mouse_handler:   MouseHandler,

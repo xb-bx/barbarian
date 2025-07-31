@@ -1,12 +1,10 @@
 package barbarian
 import "core:sys/posix"
-import "core:container/queue"
 import "core:encoding/json"
 import "core:strings"
 import "core:strconv"
 import "core:slice"
 import "core:bufio"
-import "core:io"
 import "core:os"
 import "core:fmt"
 import "vendor:nanovg"
@@ -32,7 +30,7 @@ ModuleItem :: struct {
     width:   f32,
 }
 ModuleMenuItem :: struct {
-    key: string,
+    key:   string,
     value: string,
 }
 ModuleMenu :: struct {
@@ -46,7 +44,7 @@ ModuleInput :: struct {
 }
 ClickEvent :: struct {
     button: MouseButton,
-    item: int,
+    item:   int,
 }
 MenuEvent :: struct {
     key: string,

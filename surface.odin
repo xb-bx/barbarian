@@ -2,10 +2,10 @@ package barbarian
 import "core:fmt"
 import "core:c"
 import "core:os"
-import wl "wayland-odin/wayland"
-import gl "vendor:OpenGL"
 import "vendor:egl"
 import "vendor:nanovg"
+import wl   "wayland-odin/wayland"
+import gl   "vendor:OpenGL"
 import nvgl "vendor:nanovg/gl"
 
 Surface :: struct {
@@ -66,32 +66,60 @@ xdg_surface_listner := wl.xdg_surface_listener {
         wl.xdg_surface_ack_configure(xdg_surface, serial)
     }
 }
-surface_init_popup :: proc(surface: ^Surface, output: ^wl.wl_output, state: ^State, parent: ^wl.zwlr_layer_surface_v1, w: int, h: int, pos_x: int, pos_y: int) {
-    surface.w = w
-    surface.h = h
-    surface.wl_surface = wl.wl_compositor_create_surface(state.compositor)
-    surface.state    = state
+surface_init_regular :: proc(surface: ^Surface, output: ^wl.wl_output, state: ^State) {
+    surface.layer_surface = wl.zwlr_layer_shell_v1_get_layer_surface(state.layer_shell, surface.wl_surface, output, wl.ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, "wb")
+    wl.zwlr_layer_surface_v1_set_size(surface.layer_surface, u32(surface.w), u32(surface.h))
+    wl.zwlr_layer_surface_v1_set_exclusive_zone(surface.layer_surface, i32(surface.h))
+    wl.zwlr_layer_surface_v1_set_anchor(surface.layer_surface, wl.ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP)
+
+    wl.zwlr_layer_surface_v1_set_keyboard_interactivity(surface.layer_surface, wl.ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND)
+    wl.zwlr_layer_surface_v1_add_listener(surface.layer_surface, &layer_listener, nil)
+}
+surface_init_popup :: proc(surface: ^Surface, state: ^State, opts: PopupSurface) {
     surface.is_popup = true
 
     surface.xdg_surface    = wl.xdg_wm_base_get_xdg_surface(state.xdg_wm_base, surface.wl_surface) 
     surface.xdg_positioner = wl.xdg_wm_base_create_positioner(state.xdg_wm_base)
 
-    fmt.println("pw:ph", i32(w), i32(h))
-    wl.xdg_positioner_set_size(surface.xdg_positioner, i32(w), i32(h))
-    wl.xdg_positioner_set_anchor_rect(surface.xdg_positioner, 0, 0, i32(w), i32(h))
+    wl.xdg_positioner_set_size(surface.xdg_positioner, i32(surface.w), i32(surface.h))
+    wl.xdg_positioner_set_anchor_rect(surface.xdg_positioner, 0, 0, i32(surface.w), i32(surface.h))
     wl.xdg_positioner_set_anchor(surface.xdg_positioner, wl.XDG_POSITIONER_ANCHOR_TOP_LEFT)
     wl.xdg_positioner_set_gravity(surface.xdg_positioner, wl.XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT)
-    wl.xdg_positioner_set_offset(surface.xdg_positioner, i32(pos_x), i32(pos_y))
+    wl.xdg_positioner_set_offset(surface.xdg_positioner, i32(opts.x), i32(opts.y))
     wl.xdg_positioner_set_constraint_adjustment(surface.xdg_positioner, 0)
 
-    surface.xdg_popup      = wl.xdg_surface_get_popup(surface.xdg_surface, nil, surface.xdg_positioner)
+    surface.xdg_popup = wl.xdg_surface_get_popup(surface.xdg_surface, nil, surface.xdg_positioner)
     wl.display_roundtrip(state.display)
-    wl.zwlr_layer_surface_v1_get_popup(parent, surface.xdg_popup)
+    wl.zwlr_layer_surface_v1_get_popup(opts.parent, surface.xdg_popup)
     wl.xdg_surface_add_listener(surface.xdg_surface, &xdg_surface_listner, surface)
     wl.xdg_popup_add_listener(surface.xdg_popup, &xdg_popup_listener, surface)
+}
+LayerSurface :: struct{}
+PopupSurface :: struct {
+    x:      int,
+    y:      int,
+    parent: ^wl.zwlr_layer_surface_v1,
+}
+SurfaceOpts :: union {
+    LayerSurface,
+    PopupSurface,
+}
+surface_init :: proc(surface: ^Surface, output: ^wl.wl_output, state: ^State, w: int, h: int, surface_opts: SurfaceOpts) {
+    surface.w = w
+    surface.h = h
+    surface.wl_surface = wl.wl_compositor_create_surface(state.compositor)
+    surface.state = state
+    switch opts in surface_opts {
+    case LayerSurface:
+        surface_init_regular(surface, output, state)
+    case PopupSurface:
+        surface_init_popup(surface, state, opts)
+    }
+    //if surface_opts. do surface_init_popup(surface) 
+    //else do surface_init_regular(surface)
 
-    wl.display_roundtrip(state.display)
     wl.wl_surface_commit(surface.wl_surface)
+    wl.display_roundtrip(state.display)
     surface.egl_window = wl.egl_window_create(surface.wl_surface, i32(w), i32(h))
     surface.egl_surface = egl.CreateWindowSurface(
         state.rctx.display,
@@ -103,7 +131,6 @@ surface_init_popup :: proc(surface: ^Surface, output: ^wl.wl_output, state: ^Sta
         fmt.println("Error creating window surface")
         os.exit(1)
     }
-    wl.display_roundtrip(state.display)
     surface.swap = true
 }
 frame_listener := wl.wl_callback_listener {
@@ -118,7 +145,8 @@ surface_create_frame_callback :: proc(surface: ^Surface) {
     callback := wl.wl_surface_frame(surface.wl_surface)
     wl.wl_callback_add_listener(callback, &frame_listener, surface)
 }
-surface_swap :: proc(surface: ^Surface, state: ^State) {
+surface_swap :: proc(surface: ^Surface) {
+    state := surface.state
     if (!egl.MakeCurrent(state.rctx.display, surface.egl_surface, surface.egl_surface, state.rctx.ctx)) {
         fmt.println("Error making current!")
         return
@@ -128,35 +156,6 @@ surface_swap :: proc(surface: ^Surface, state: ^State) {
     wl.wl_surface_damage_buffer(surface.wl_surface, 0, 0, i32(surface.w), i32(surface.h))
     wl.wl_surface_commit(surface.wl_surface)
     surface.swap = false
-}
-surface_init :: proc(surface: ^Surface, output: ^wl.wl_output, state: ^State, w: int, h: int) {
-    surface.w = w
-    surface.h = h
-    surface.wl_surface = wl.wl_compositor_create_surface(state.compositor)
-    surface.state = state
-
-    surface.layer_surface = wl.zwlr_layer_shell_v1_get_layer_surface(state.layer_shell, surface.wl_surface, output, wl.ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, "wb")
-    wl.zwlr_layer_surface_v1_set_size(surface.layer_surface, u32(w), u32(h))
-    wl.zwlr_layer_surface_v1_set_exclusive_zone(surface.layer_surface, i32(h))
-    wl.zwlr_layer_surface_v1_set_anchor(surface.layer_surface, wl.ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP)
-
-    wl.zwlr_layer_surface_v1_set_keyboard_interactivity(surface.layer_surface, wl.ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_ON_DEMAND)
-    wl.zwlr_layer_surface_v1_add_listener(surface.layer_surface, &layer_listener, nil)
-
-    wl.wl_surface_commit(surface.wl_surface)
-    wl.display_roundtrip(state.display)
-    surface.egl_window = wl.egl_window_create(surface.wl_surface, i32(w), i32(h))
-    surface.egl_surface = egl.CreateWindowSurface(
-        state.rctx.display,
-        state.rctx.config,
-        egl.NativeWindowType(surface.egl_window),
-        nil,
-    )
-    if surface.egl_surface == egl.NO_SURFACE {
-        fmt.println("Error creating window surface")
-        os.exit(1)
-    }
-    surface.swap = true
 }
 surface_destroy :: proc(surface: ^Surface) {
     wl.wl_surface_attach(surface.wl_surface, nil, 0, 0)

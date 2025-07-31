@@ -1,33 +1,26 @@
 package barbarian
 
 import "core:bufio"
-import "core:mem"
-import "core:encoding/json"
-import "core:math"
 import "core:c"
 import "core:strings"
 import "core:os"
 import "core:time"
-import "core:time/datetime"
-import "core:c/libc"
 import "core:fmt"
 import "core:flags"
 import "core:slice"
 import "wayland-odin/render"
-import "wayland-odin/utils"
-import wl "wayland-odin/wayland"
 
 import "core:sys/posix"
 
 import "base:runtime"
-import gl "vendor:OpenGL"
 import "vendor:egl"
-import "vendor:fontstash"
 import "vendor:nanovg"
 import nvgl "vendor:nanovg/gl"
+import gl "vendor:OpenGL"
+import wl "wayland-odin/wayland"
 Mouse :: struct {
-    pos_x:  f32,
-    pos_y:  f32,
+    pos_x:   f32,
+    pos_y:   f32,
     handler: ^MouseHandler,
 }
 State :: struct {
@@ -54,18 +47,12 @@ State :: struct {
     tooltip:     ^Tooltip,
 }
 MouseHandler :: struct {
-    data: rawptr,
+    data:   rawptr,
     motion: proc(data: rawptr, state: ^State, pos_x: f32, pos_y: f32),
-    click: proc(data: rawptr, state: ^State, btn: MouseButton, serial: u32),
+    click:  proc(data: rawptr, state: ^State, btn: MouseButton, serial: u32),
     scroll: proc(data: rawptr, state: ^State, dir: int),
 }
 
-pixel :: struct {
-    b: u8,
-    g: u8,
-    r: u8,
-    a: u8,
-}
 output_geometry :: proc "c" (
     data: rawptr,
     wl_output: ^wl.wl_output,
@@ -349,8 +336,6 @@ registry_listener := wl.wl_registry_listener {
 }
 
 
-w: int = 0
-h: int = 0
 layer_listener:  wl.zwlr_layer_surface_v1_listener = {
     configure = proc "c" (
         data: rawptr,
@@ -360,9 +345,6 @@ layer_listener:  wl.zwlr_layer_surface_v1_listener = {
         height: c.uint32_t,
     ) {
         context = runtime.default_context()
-        w = int(width)
-        h = int(height)
-        fmt.println("configure", w, h)
         wl.zwlr_layer_surface_v1_ack_configure(zwlr_layer_surface_v1, serial)
         
     },
@@ -440,7 +422,7 @@ main :: proc() {
     state.rctx = init_egl(display)
     gl.load_up_to(int(4), 5, egl.gl_set_proc_address)
     for monitor in state.monitors {
-        surface_init(&monitor.surface, monitor.output, &state, monitor.surface.w, monitor.surface.h)
+        surface_init(&monitor.surface, monitor.output, &state, monitor.surface.w, monitor.surface.h, LayerSurface{})
     }
     wl.display_roundtrip(display)
 
@@ -488,13 +470,13 @@ main :: proc() {
         if state.menu != nil {
             if state.menu.rerender && state.menu.surface.swap {
                 menu_render(state.menu)
-                surface_swap(&state.menu.surface, &state)
+                surface_swap(&state.menu.surface)
             }
         }
         if state.tooltip != nil {
             if state.tooltip.rerender && tooltip_get_time_to_show(state.tooltip) <= 0  && (state.tooltip.surface.swap || !state.tooltip.displayed) {
                 tooltip_render(state.tooltip, &state)
-                surface_swap(&state.tooltip.surface, &state)
+                surface_swap(&state.tooltip.surface)
             }
         }
         for monitor in state.monitors {
@@ -540,7 +522,7 @@ main :: proc() {
                     
                 }
 
-                surface_swap(&monitor.surface, &state)
+                surface_swap(&monitor.surface)
                 monitor.surface.redraw = false
             }
         }

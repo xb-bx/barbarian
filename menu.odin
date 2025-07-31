@@ -1,11 +1,11 @@
 package barbarian
 import "vendor:nanovg"
-import nvgl "vendor:nanovg/gl"
 import "vendor:egl"
-import gl "vendor:OpenGL"
-import wl "wayland-odin/wayland"
 import "core:fmt"
 import "core:math"
+import nvgl "vendor:nanovg/gl"
+import gl   "vendor:OpenGL"
+import wl   "wayland-odin/wayland"
 MENU_MIN_WIDTH         :: 120
 MENU_MAX_WIDTH         :: 500
 MENU_MAX_ITEMS         :: 20
@@ -69,7 +69,7 @@ menu_init :: proc(menu: ^Menu, state: ^State, parent: ^Monitor, items: ModuleMen
     menu.items = items
     menu.hovered_item = -1
     menu.parent = parent
-    surface_init_popup(&menu.surface, parent.output, state, parent.surface.layer_surface, int(math.ceil(width)), int(math.ceil(height)), int(state.mouse.pos_x - 5), int(state.mouse.pos_y-5))
+    surface_init(&menu.surface, parent.output, state, int(math.ceil(width)), int(math.ceil(height)), PopupSurface { int(state.mouse.pos_x - 5), int(state.mouse.pos_y-5), parent.surface.layer_surface})
     if (!egl.MakeCurrent(menu.state.rctx.display, menu.surface.egl_surface, menu.surface.egl_surface, menu.state.rctx.ctx)) {
         fmt.println("Error making current!")
         return

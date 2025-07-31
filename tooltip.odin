@@ -2,12 +2,14 @@ package barbarian
 import "core:strings"
 import "core:time"
 import "core:fmt"
-import wl "wayland-odin/wayland"
 
-import gl "vendor:OpenGL"
 import "vendor:egl"
 import "vendor:nanovg"
+
+import gl   "vendor:OpenGL"
 import nvgl "vendor:nanovg/gl"
+import wl   "wayland-odin/wayland"
+
 TOOLTIP_DELAY     :: time.Millisecond * 500
 TOOLTIP_PAD       :: 4
 TOOLTIP_MAX_WIDTH :: 500
@@ -45,7 +47,7 @@ tooltip_render :: proc(tooltip: ^Tooltip, state: ^State) {
         pos_x  := tooltip.module.current_input.items.([]ModuleItem)[0].pos - PAD - 2
         mod_width := calculate_width(tooltip.module, ctx) + PAD * 2
         pos_x += (mod_width - width) / 2
-        surface_init_popup(&tooltip.surface, tooltip.monitor.output, state, tooltip.monitor.surface.layer_surface, int(width), int(height), int(pos_x), int(f32(tooltip.monitor.surface.h) + 5))
+        surface_init(&tooltip.surface, tooltip.monitor.output, state, int(width), int(height), PopupSurface { int(pos_x), int(f32(tooltip.monitor.surface.h) + 5), tooltip.monitor.surface.layer_surface })
     }
     ctx = tooltip.surface.nvg_ctx
 
