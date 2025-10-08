@@ -18,6 +18,14 @@ import "vendor:nanovg"
 import nvgl "vendor:nanovg/gl"
 import gl "vendor:OpenGL"
 import wl "wayland-odin/wayland"
+
+foreign import wayland "system:wayland-client"
+foreign wayland {
+    wl_display_prepare_read :: proc "c" (display: ^wl.wl_display) ---
+    wl_display_cancel_read:: proc "c" (display: ^wl.wl_display) ---
+    wl_display_read_events :: proc "c" (display: ^wl.wl_display) ---
+}
+
 Mouse :: struct {
     pos_x:   f32,
     pos_y:   f32,
@@ -526,13 +534,15 @@ main :: proc() {
             }
         }
 
-        prepare_poll_fds(&pollfds, &state)
         timeout := i32(-1)
         if state.tooltip != nil {
             timeout = tooltip_get_time_to_show(state.tooltip)
             if timeout < 0 do timeout = -1
         }
+        wl.display_dispatch_pending(display)
         wl.display_flush(display)
+        prepare_poll_fds(&pollfds, &state)
+        wl_display_prepare_read(display)
         res := posix.poll(slice.as_ptr(pollfds[:]), u32(len(pollfds)), timeout)
         if res == -1 {
             fmt.println("ERROR:", posix.strerror(posix.errno()))
@@ -567,9 +577,12 @@ main :: proc() {
             }
         }
         if .IN in pollfds[0].revents {
-            wl.display_dispatch(display)
+            wl_display_read_events(display)
+        } else {
+            wl_display_cancel_read(display)
         }
-        wl.display_flush(display)
+        wl.display_dispatch_pending(display)
     }
 }
+
 
