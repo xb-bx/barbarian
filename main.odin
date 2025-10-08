@@ -465,7 +465,6 @@ main :: proc() {
     }
     pollfds := make([dynamic]posix.pollfd)
     wl.display_roundtrip(display)
-    egl.SwapInterval(state.rctx.display, 1)
     for {
         if state.menu != nil {
             if state.menu.rerender && state.menu.surface.swap {

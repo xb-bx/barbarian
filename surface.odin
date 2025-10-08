@@ -152,6 +152,7 @@ surface_swap :: proc(surface: ^Surface) {
         return
     }
     egl.SwapBuffers(state.rctx.display, surface.egl_surface)
+    // gl.Finish()
     surface_create_frame_callback(surface)
     wl.wl_surface_damage_buffer(surface.wl_surface, 0, 0, i32(surface.w), i32(surface.h))
     wl.wl_surface_commit(surface.wl_surface)
