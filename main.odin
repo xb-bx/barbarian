@@ -53,6 +53,7 @@ State :: struct {
     font_size:   f32,
     height:      f32,
     tooltip:     ^Tooltip,
+    ctrl_pressed: bool,
 }
 MouseHandler :: struct {
     data:   rawptr,
@@ -144,6 +145,63 @@ MouseButton :: enum {
     Left   = 272,
     Right  = 273,
     Middle = 274,
+}
+keyboard_listener: wl.wl_keyboard_listener = {
+	keymap = proc "c" (
+		data: rawptr,
+		wl_keyboard: ^wl.wl_keyboard,
+		format: c.uint32_t,
+		fd: c.int32_t,
+		size: c.uint32_t,
+	) {},
+	enter = proc "c" (
+		data: rawptr,
+		wl_keyboard: ^wl.wl_keyboard,
+		serial: c.uint32_t,
+		surface: ^wl.wl_surface,
+		keys: ^wl.wl_array,
+	) {
+        state: ^State = cast(^State)data
+        context = state.ctx
+        state.ctrl_pressed = false
+    },
+	leave = proc "c" (
+		data: rawptr,
+		wl_keyboard: ^wl.wl_keyboard,
+		serial: c.uint32_t,
+		surface: ^wl.wl_surface,
+	){
+        state: ^State = cast(^State)data
+        context = state.ctx
+        state.ctrl_pressed = false
+    },
+	key = proc "c" (
+		data: rawptr,
+		wl_keyboard: ^wl.wl_keyboard,
+		serial: c.uint32_t,
+		time: c.uint32_t,
+		key: c.uint32_t,
+		state: c.uint32_t,
+	){},
+	modifiers = proc "c" (
+		data: rawptr,
+		wl_keyboard: ^wl.wl_keyboard,
+		serial: c.uint32_t,
+		mods_depressed: c.uint32_t,
+		mods_latched: c.uint32_t,
+		mods_locked: c.uint32_t,
+		group: c.uint32_t,
+	){
+        state: ^State = cast(^State)data
+        context = state.ctx
+        state.ctrl_pressed = (mods_depressed & 4) != 0
+    },
+	repeat_info = proc "c" (
+		data: rawptr,
+		wl_keyboard: ^wl.wl_keyboard,
+		rate: c.int32_t,
+		delay: c.int32_t,
+	){},
 }
 pointer_listener: wl.wl_pointer_listener = {
     enter = proc "c" (
@@ -269,6 +327,10 @@ seat_listener: wl.wl_seat_listener = {
             pointer := wl.wl_seat_get_pointer(wl_seat)
             wl.wl_pointer_add_listener(pointer, &pointer_listener, data)
         } 
+        if capabilities & wl.WL_SEAT_CAPABILITY_KEYBOARD > 0 {
+            kbd := wl.wl_seat_get_keyboard(wl_seat)
+            wl.wl_keyboard_add_listener(kbd, &keyboard_listener, data)
+        }
     }, 
     name = proc "c" (data: rawptr, wl_seat: ^wl.wl_seat, name: cstring) {
         context = runtime.default_context()
@@ -543,7 +605,7 @@ main :: proc() {
         wl.display_flush(display)
         prepare_poll_fds(&pollfds, &state)
         wl_display_prepare_read(display)
-        res := posix.poll(slice.as_ptr(pollfds[:]), u32(len(pollfds)), timeout)
+        res := posix.poll(slice.as_ptr(pollfds[:]), u64(len(pollfds)), timeout)
         if res == -1 {
             fmt.println("ERROR:", posix.strerror(posix.errno()))
         }

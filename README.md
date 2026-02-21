@@ -5,6 +5,9 @@
 The bar looks for $XDG_CONFIG_HOME/barbarian/config.json5 or $HOME/.config/barbarian/config.json5
 [example config](https://github.com/xb-bx/barbarian/tree/master/config.json5)
 
+### Useful
+To restart or stop a module right-click it while holding CTRL
+
 ### Custom modules
 The bar communicates with modules via stdio
 A module must write either plain text or json to stdout

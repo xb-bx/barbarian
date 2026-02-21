@@ -1,3 +1,4 @@
+#+feature using-stmt
 package barbarian
 import "core:strings"
 import "core:slice"
@@ -89,6 +90,7 @@ monitor_mouse_scroll :: proc(data: rawptr, state: ^State, dir: int) {
         send_event(res_mod, ModuleEvent { type = .Scroll, scroll = ScrollEvent { dir = dir }})
     }
 }
+restart_items := []ModuleMenuItem { { "stop", "Stop", }, { "restart", "Restart" }, }
 monitor_mouse_click :: proc(data: rawptr, state: ^State, btn: MouseButton, serial: u32) {
     mon := cast(^Monitor)data
     menu_close(state)
@@ -108,7 +110,19 @@ monitor_mouse_click :: proc(data: rawptr, state: ^State, btn: MouseButton, seria
         if res_mod != nil do break
     }
     if res_mod != nil {
-        if res_mod.current_input.menu != nil && res_mod.current_input.menu.(ModuleMenu).open_on == btn {
+        if state.ctrl_pressed && btn == .Right {
+            state.menu = new(Menu)
+            menu_init(state.menu, state, mon, { items = restart_items }, proc(data: rawptr, index: int) { 
+                mod := cast(^Module)data
+                if index == 0 {
+                    stop_module(mod)
+                } else if index == 1 {
+                    stop_module(mod)
+                    mod.stopped = false
+                    run_module(mod)
+                }
+            }, res_mod, mon.surface.nvg_ctx)
+        } else if res_mod.current_input.menu != nil && res_mod.current_input.menu.(ModuleMenu).open_on == btn {
             state.menu = new(Menu)
             menu := res_mod.current_input.menu.(ModuleMenu)
             menu_init(state.menu, state, mon, menu, proc(data: rawptr, index: int) {
