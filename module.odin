@@ -85,7 +85,7 @@ pipe :: proc(fdes: ^[2]posix.FD) -> posix.Errno {
     if posix.pipe(fdes) == .FAIL do return posix.get_errno()
     return nil
 }
-stop_module :: proc(module: ^Module) {
+module_stop :: proc(module: ^Module) {
     posix.kill(module.pid, .SIGKILL)
     bufio.reader_destroy(&module.rd)
     module.rd = {}
@@ -93,7 +93,12 @@ stop_module :: proc(module: ^Module) {
     posix.close(module.pipe_in)
     posix.close(module.pipe_out)
 }
-run_module :: proc(module: ^Module) -> posix.Errno {
+module_delete :: proc(module: ^Module) {
+    if module.current_input.items != nil do delete_items(module.current_input.items.([]ModuleItem))
+    if module.current_input.tooltip != nil do delete(module.current_input.tooltip.(string))
+    if module.current_input.menu != nil do delete_menu(module.current_input.menu.(ModuleMenu))
+}
+module_run :: proc(module: ^Module) -> posix.Errno {
     if module.current_input.items != nil do delete_items(module.current_input.items.([]ModuleItem))
     if module.current_input.tooltip != nil do delete(module.current_input.tooltip.(string))
     if module.current_input.menu != nil do delete_menu(module.current_input.menu.(ModuleMenu))

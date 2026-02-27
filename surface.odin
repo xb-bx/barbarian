@@ -44,7 +44,6 @@ xdg_popup_listener := wl.xdg_popup_listener {
 	) {
         surface := cast(^Surface)data
         context = surface.state.ctx
-        fmt.println("done")
         menu_close(surface.state)
     },
 	repositioned = proc "c" (
@@ -54,7 +53,6 @@ xdg_popup_listener := wl.xdg_popup_listener {
 	) {
         surface := cast(^Surface)data
         context = surface.state.ctx
-        fmt.println("repos", token)
     }
 }
 xdg_surface_listner := wl.xdg_surface_listener {

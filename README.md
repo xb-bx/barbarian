@@ -60,7 +60,7 @@ Example module input:
 ```
 Look for examples in [./example-modules](https://github.com/xb-bx/barbarian/tree/master/example-modules)
 ## TODO:
-- [ ] Test multiple monitors
+- [x] Test multiple monitors
 - [ ] Scaling
 
 

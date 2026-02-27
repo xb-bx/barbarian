@@ -4,6 +4,7 @@ import "core:strings"
 import "core:slice"
 import "core:time"
 import "core:fmt"
+import "core:c"
 import wl "wayland-odin/wayland"
 
 import gl "vendor:OpenGL"
@@ -17,11 +18,13 @@ MonitorIterator :: struct {
 }
 Monitor :: struct {
     mouse_handler:   MouseHandler,
+    wl_name:         c.uint32_t,
     output:          ^wl.wl_output,
     name:            string,
     left:            []Module,
     right:           []Module,
     surface:         Surface,
+    geom_changed:    bool,
 }
 monitor_iter :: proc(using iter: ^MonitorIterator) -> (^Module, bool) {
     mods: []Module = {}
@@ -115,11 +118,11 @@ monitor_mouse_click :: proc(data: rawptr, state: ^State, btn: MouseButton, seria
             menu_init(state.menu, state, mon, { items = restart_items }, proc(data: rawptr, index: int) { 
                 mod := cast(^Module)data
                 if index == 0 {
-                    stop_module(mod)
+                    module_stop(mod)
                 } else if index == 1 {
-                    stop_module(mod)
+                    module_stop(mod)
                     mod.stopped = false
-                    run_module(mod)
+                    module_run(mod)
                 }
             }, res_mod, mon.surface.nvg_ctx)
         } else if res_mod.current_input.menu != nil && res_mod.current_input.menu.(ModuleMenu).open_on == btn {
@@ -162,4 +165,65 @@ get_or_create_monitor_for_output :: proc(st: ^State, output: ^wl.wl_output) -> ^
     mon.output = output
     append(&st.monitors, mon)
     return mon
+}
+monitor_destroy :: proc(mon: ^Monitor) {
+    for &mod in mon.left {
+        if !mod.stopped do module_stop(&mod) 
+        module_delete(&mod)
+    }
+    for &mod in mon.right {
+        if !mod.stopped do module_stop(&mod) 
+        module_delete(&mod)
+    }
+    delete(mon.left)
+    delete(mon.right)
+    if mon.surface.nvg_ctx != nil do nvgl.Destroy(mon.surface.nvg_ctx)
+    if mon.surface.wl_surface != nil do surface_destroy(&mon.surface)
+    wl.wl_output_release(mon.output)
+}
+init_modules :: proc(modules_out: ^[]Module, cfg: ^Config, modules: []string) {
+    mods := make([dynamic]Module)
+    for module in modules {
+        mod_cfg, ok := cfg.modules[module]
+        if !ok { 
+            fmt.eprintln("ERROR: No module", module)
+            continue
+        }
+        append(&mods, Module {
+            exec      = mod_cfg.exec,
+            clickable = mod_cfg.clickable,
+            min_width = mod_cfg.min_width,
+        })
+    }
+    modules_out ^= mods[:]
+    for &mod in modules_out^ {
+        err := module_run(&mod)
+        if err != nil do fmt.eprintln("ERROR: Failed to run module", mod.exec)
+    }
+}
+monitor_reload :: proc(state: ^State, cfg: ^Config, monitor: ^Monitor) {
+    monitor.surface.redraw = true
+    monitor.geom_changed = false
+    if monitor.surface.nvg_ctx != nil do nvgl.Destroy(monitor.surface.nvg_ctx)
+
+    if monitor.surface.wl_surface != nil do surface_destroy(&monitor.surface)
+    if monitor.left == nil && monitor.right == nil {
+        for name, out in cfg.outputs {
+            if name == monitor.name {
+                init_modules(&monitor.left, cfg, out.modules_left)
+                init_modules(&monitor.right, cfg, out.modules_right)
+                break
+            }
+        }
+    }
+    surface_init(&monitor.surface, monitor.output, state, monitor.surface.w, monitor.surface.h, LayerSurface{})
+
+    if (!egl.MakeCurrent(state.rctx.display, monitor.surface.egl_surface, monitor.surface.egl_surface, state.rctx.ctx)) {
+        fmt.println("Error making current!")
+        return
+    }
+    monitor.surface.nvg_ctx = nvgl.Create({.DEBUG, .ANTI_ALIAS})
+    nanovg.CreateFontMem(monitor.surface.nvg_ctx, "sans", state.font, false)
+    monitor.surface.redraw = true
+    monitor.surface.swap = true
 }

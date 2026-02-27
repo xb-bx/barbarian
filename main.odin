@@ -90,6 +90,7 @@ output_mode :: proc "c" (
     st := transmute(^State)data
     context = st.ctx
     monitor := get_or_create_monitor_for_output(st, wl_output)
+    monitor.geom_changed = monitor.geom_changed || monitor.surface.w != int(width)
     monitor.surface.w = int(width)
     monitor.surface.h = int(st.height)
 }
@@ -97,7 +98,6 @@ output_done  :: proc "c" (data: rawptr, wl_output: ^wl.wl_output) {
     st := transmute(^State)data
     context = st.ctx
     monitor := get_or_create_monitor_for_output(st, wl_output)
-    //monitor.refresh_surface = true
 }
 output_scale :: proc "c" (data: rawptr, wl_output: ^wl.wl_output, factor: c.int32_t) {
     st := transmute(^State)data
@@ -115,7 +115,6 @@ output_name  :: proc "c" (data: rawptr, wl_output: ^wl.wl_output, name: cstring)
 output_description :: proc "c" (data: rawptr, wl_output: ^wl.wl_output, description: cstring) {
 
 }
-main_output: ^wl.wl_output = nil
 output_listener: wl.wl_output_listener = {
     geometry    = output_geometry,
     mode        = output_mode,
@@ -372,8 +371,10 @@ global :: proc "c" (
         cast(^wl.wl_shm)(wl.wl_registry_bind(registry, name, &wl.wl_shm_interface, version))
     }
     if interface == wl.wl_output_interface.name {
-        main_output = cast(^wl.wl_output)wl.wl_registry_bind(registry, name, &wl.wl_output_interface, version)
-        wl.wl_output_add_listener(main_output, &output_listener, state)
+        output := cast(^wl.wl_output)wl.wl_registry_bind(registry, name, &wl.wl_output_interface, version)
+        wl.wl_output_add_listener(output, &output_listener, state)
+        mon := get_or_create_monitor_for_output(state, output)
+        mon.wl_name = name
     }
     if interface == wl.wl_seat_interface.name {
         state.seat = cast(^wl.wl_seat)wl.wl_registry_bind(registry, name, &wl.wl_seat_interface, version)
@@ -396,8 +397,16 @@ global :: proc "c" (
 }
 
 global_remove :: proc "c" (data: rawptr, registry: ^wl.wl_registry, name: c.uint32_t) {
-    context = runtime.default_context()
-    fmt.println("remove")
+    state: ^State = cast(^State)data
+    context = state.ctx
+    for &mon, i in state.monitors {
+        if mon.wl_name == name {
+            monitor_destroy(mon)
+            unordered_remove(&state.monitors, i)
+            break
+        }
+    }
+    fmt.println("remove", name)
 }
 
 registry_listener := wl.wl_registry_listener {
@@ -493,6 +502,7 @@ main :: proc() {
     gl.load_up_to(int(4), 5, egl.gl_set_proc_address)
     for monitor in state.monitors {
         surface_init(&monitor.surface, monitor.output, &state, monitor.surface.w, monitor.surface.h, LayerSurface{})
+        monitor.geom_changed = false
     }
     wl.display_roundtrip(display)
 
@@ -509,27 +519,7 @@ main :: proc() {
     wl.display_roundtrip(display)
     for output, out_config in cfg.outputs {
         monitor := get_monitor_by_name(&state, output) 
-        if monitor == nil do fmt.eprintln("WARN: No output", output)
-        init_modules :: proc(modules_out: ^[]Module, cfg: ^Config, modules: []string) {
-            mods := make([dynamic]Module)
-            for module in modules {
-                mod_cfg, ok := cfg.modules[module]
-                if !ok { 
-                    fmt.eprintln("ERROR: No module", module)
-                    continue
-                }
-                append(&mods, Module {
-                    exec      = mod_cfg.exec,
-                    clickable = mod_cfg.clickable,
-                    min_width = mod_cfg.min_width,
-                })
-            }
-            modules_out ^= mods[:]
-            for &mod in modules_out^ {
-                err := run_module(&mod)
-                if err != nil do fmt.eprintln("ERROR: Failed to run module", mod.exec)
-            }
-        }
+        if monitor == nil  { fmt.eprintln("WARN: No output", output); continue }
         init_modules(&monitor.left, cfg, out_config.modules_left)
         init_modules(&monitor.right, cfg, out_config.modules_right)
     }
@@ -548,7 +538,10 @@ main :: proc() {
                 surface_swap(&state.tooltip.surface)
             }
         }
-        for monitor in state.monitors {
+        for &monitor in state.monitors {
+            if monitor.geom_changed {
+                monitor_reload(&state, cfg, monitor)
+            }
             if monitor.surface.redraw && monitor.surface.swap {
                 if (!egl.MakeCurrent(state.rctx.display, monitor.surface.egl_surface, monitor.surface.egl_surface, state.rctx.ctx)) {
                     fmt.println("Error making current!")
