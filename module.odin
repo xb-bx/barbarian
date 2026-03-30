@@ -70,6 +70,7 @@ Module :: struct {
     current_input:   ModuleInput,
     pipe_in:         posix.FD,
     pipe_out:        posix.FD,
+    file_out:        ^os.File,
     rd:              bufio.Reader,
     redraw:          bool,
     pollfd_index:    int,
@@ -92,6 +93,7 @@ module_stop :: proc(module: ^Module) {
     module.stopped = true
     posix.close(module.pipe_in)
     posix.close(module.pipe_out)
+    os.close(module.file_out)
 }
 module_delete :: proc(module: ^Module) {
     if module.current_input.items != nil do delete_items(module.current_input.items.([]ModuleItem))
@@ -129,7 +131,9 @@ module_run :: proc(module: ^Module) -> posix.Errno {
         module.pid = pid
     }
     posix.fcntl(pipes_in[1], .SETFL, posix.fcntl(pipes_in[1], .GETFL, 0) | posix.O_NONBLOCK)
-    bufio.reader_init(&module.rd, os.stream_from_handle(os.Handle(pipes_out[0])))
+    module.file_out = os.new_file(uintptr(pipes_out[0]), "module_input")
+    fmt.println(module.file_out)
+    bufio.reader_init(&module.rd, os.to_reader(module.file_out))
     return nil
 }
 hex_to_color :: proc(hex: string) -> (Color, bool) {

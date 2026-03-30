@@ -32,17 +32,17 @@ ConfigError :: union #shared_nil {
 load_config :: proc(config_path: string) -> (cfg: ^Config, err: ConfigError) {
     config_path := config_path
     if config_path == "" {
-        config_path = os.get_env("XDG_CONFIG_HOME")
+        config_path = os.get_env("XDG_CONFIG_HOME", context.temp_allocator)
         if config_path == "" {
-            arr := [4]string{os.get_env("HOME"), ".config", "barbarian", "config.json5"}
-            config_path = filepath.join(arr[:])
+            arr := [4]string{os.get_env("HOME", context.temp_allocator), ".config", "barbarian", "config.json5"}
+            config_path, _ = filepath.join(arr[:], context.temp_allocator)
         } else {
             arr := [3]string{config_path, "barbarian", "config.json5"}
-            config_path = filepath.join(arr[:])
+            config_path, _ = filepath.join(arr[:], context.temp_allocator)
         }
     } 
 
-    file := os.read_entire_file_from_filename_or_err(config_path) or_return
+    file := os.read_entire_file_from_path(config_path, context.allocator) or_return
     defer delete(file)
     cfg = new(Config)
     json.unmarshal(file, cfg, json.Specification.JSON5) or_return

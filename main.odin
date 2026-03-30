@@ -460,7 +460,7 @@ main :: proc() {
         fmt.eprintln("ERROR while loading config:", err)
         os.exit(1)
     }
-    fontdata, os_err := os.read_entire_file_or_err(cfg.font)
+    fontdata, os_err := os.read_entire_file_from_path(cfg.font, context.allocator)
     if os_err != nil {
         fmt.eprintln("ERROR while loading font:", os_err)
         os.exit(1)
