@@ -66,7 +66,9 @@ monitor_get_mod_at :: proc(mon: ^Monitor, pos_x: f32, pos_y: f32) -> (^Module, i
 monitor_mouse_motion :: proc(data: rawptr, state: ^State, pos_x: f32, pos_y: f32) {
     mon := cast(^Monitor)data
     res_mod, _ := monitor_get_mod_at(mon, pos_x, pos_y)
+    shape := wl.WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT
     if res_mod != nil {
+        if res_mod.clickable do shape = wl.WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_POINTER
         if state.tooltip != nil {
             if state.tooltip.module == res_mod {
                 if !state.tooltip.displayed {
@@ -84,7 +86,7 @@ monitor_mouse_motion :: proc(data: rawptr, state: ^State, pos_x: f32, pos_y: f32
         tooltip_destroy(state.tooltip, state)
         state.tooltip = nil
     }
-
+    wl.wp_cursor_shape_device_v1_set_shape(state.cursor_device, 0, u32(shape))
 }
 monitor_mouse_scroll :: proc(data: rawptr, state: ^State, dir: int) {
     mon := cast(^Monitor)data

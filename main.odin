@@ -32,28 +32,30 @@ Mouse :: struct {
     handler: ^MouseHandler,
 }
 State :: struct {
-    display:     ^wl.wl_display,
-    compositor:  ^wl.wl_compositor,
-    layer_shell: ^wl.zwlr_layer_shell_v1,
-    shm:         ^wl.wl_shm,
-    seat:        ^wl.wl_seat,
-    monitors:    [dynamic]^Monitor,
-    ctx:         runtime.Context,
-    rctx:        render.RenderContext,
-    xdg_wm_base: ^wl.xdg_wm_base,
-    mouse:       Mouse,
-    bg:          Color,
-    fg:          Color,
-    tooltip_bg:  Color,
-    tooltip_fg:  Color,
-    menu_bg:     Color,
-    menu_fg:     Color,
-    menu:        ^Menu,
-    font:        []byte,
-    font_size:   f32,
-    height:      f32,
-    tooltip:     ^Tooltip,
-    ctrl_pressed: bool,
+    display:        ^wl.wl_display,
+    compositor:     ^wl.wl_compositor,
+    layer_shell:    ^wl.zwlr_layer_shell_v1,
+    cursor_manager: ^wl.wp_cursor_shape_manager_v1,
+    cursor_device:  ^wl.wp_cursor_shape_device_v1,
+    shm:            ^wl.wl_shm,
+    seat:           ^wl.wl_seat,
+    monitors:       [dynamic]^Monitor,
+    ctx:            runtime.Context,
+    rctx:           render.RenderContext,
+    xdg_wm_base:    ^wl.xdg_wm_base,
+    mouse:          Mouse,
+    bg:             Color,
+    fg:             Color,
+    tooltip_bg:     Color,
+    tooltip_fg:     Color,
+    menu_bg:        Color,
+    menu_fg:        Color,
+    menu:           ^Menu,
+    font:           []byte,
+    font_size:      f32,
+    height:         f32,
+    tooltip:        ^Tooltip,
+    ctrl_pressed:   bool,
 }
 MouseHandler :: struct {
     data:   rawptr,
@@ -365,7 +367,6 @@ global :: proc "c" (
                 version,
             ))
     }
-
     if interface == wl.wl_shm_interface.name {
         state.shm =
         cast(^wl.wl_shm)(wl.wl_registry_bind(registry, name, &wl.wl_shm_interface, version))
@@ -384,13 +385,21 @@ global :: proc "c" (
         state.xdg_wm_base = cast(^wl.xdg_wm_base)wl.wl_registry_bind(registry, name, &wl.xdg_wm_base_interface, version)
         wl.xdg_wm_base_add_listener(state.xdg_wm_base, &xdg_listener, state)
     }
-
     if interface == wl.zwlr_layer_shell_v1_interface.name {
         state.layer_shell =
         cast(^wl.zwlr_layer_shell_v1)(wl.wl_registry_bind(
                 registry,
                 name,
                 &wl.zwlr_layer_shell_v1_interface,
+                version,
+            ))
+    }
+    if interface == wl.wp_cursor_shape_manager_v1_interface.name {
+        state.cursor_manager =
+        cast(^wl.wp_cursor_shape_manager_v1)(wl.wl_registry_bind(
+                registry,
+                name,
+                &wl.wp_cursor_shape_manager_v1_interface,
                 version,
             ))
     }
@@ -497,6 +506,8 @@ main :: proc() {
     }
     wl.display_roundtrip(display)
     fmt.println(len(state.monitors), "outputs")
+
+    state.cursor_device = wl.wp_cursor_shape_manager_v1_get_pointer(state.cursor_manager, wl.wl_seat_get_pointer(state.seat))
 
     state.rctx = init_egl(display)
     gl.load_up_to(int(4), 5, egl.gl_set_proc_address)

@@ -35,6 +35,7 @@ to_nvg_color :: proc(col: Color) -> nanovg.Color {
 menu_scroll :: proc(data: rawptr, state: ^State, dir: int) {}
 menu_motion :: proc(data: rawptr, state: ^State, pos_x: f32, pos_y: f32) {
     menu := cast(^Menu)data
+    wl.wp_cursor_shape_device_v1_set_shape(state.cursor_device, 0, wl.WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_POINTER)
     new_hovered := int(pos_y / menu.item_height)
     menu.rerender = menu.hovered_item != new_hovered
     menu.hovered_item  = new_hovered
