@@ -5,8 +5,6 @@ import "core:os"
 import "vendor:egl"
 import "vendor:nanovg"
 import wl   "wayland-odin/wayland"
-import gl   "vendor:OpenGL"
-import nvgl "vendor:nanovg/gl"
 
 Surface :: struct {
     w:             int,
@@ -53,7 +51,7 @@ xdg_popup_listener := wl.xdg_popup_listener {
 	) {
         surface := cast(^Surface)data
         context = surface.state.ctx
-    }
+    },
 }
 xdg_surface_listner := wl.xdg_surface_listener {
 	configure = proc "c" (
@@ -62,7 +60,7 @@ xdg_surface_listner := wl.xdg_surface_listener {
 		serial: c.uint32_t,
 	) {
         wl.xdg_surface_ack_configure(xdg_surface, serial)
-    }
+    },
 }
 surface_init_regular :: proc(surface: ^Surface, output: ^wl.wl_output, state: ^State) {
     surface.layer_surface = wl.zwlr_layer_shell_v1_get_layer_surface(state.layer_shell, surface.wl_surface, output, wl.ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, "wb")
@@ -137,7 +135,7 @@ frame_listener := wl.wl_callback_listener {
         surface := cast(^Surface)data
         context = surface.state.ctx
         surface.swap = true 
-    }
+    },
 }
 surface_create_frame_callback :: proc(surface: ^Surface) {
     callback := wl.wl_surface_frame(surface.wl_surface)

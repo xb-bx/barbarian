@@ -30,11 +30,10 @@ foreign foo {
     ChooseConfig :: proc(display: egl.Display, attrib_list: ^i32, configs: ^egl.Config, config_size: i32, num_config: ^i32) -> egl.Boolean ---
 }
 init_egl :: proc(display: ^wl.wl_display) -> render.RenderContext {
-    major, minor, n, size: i32
+    major, minor, n: i32
     count: i32 = 0
     configs: [^]egl.Config
     egl_conf: egl.Config
-    i: int
     config_attribs: []i32 = {
         egl.SURFACE_TYPE,
         egl.WINDOW_BIT,

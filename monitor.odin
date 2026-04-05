@@ -1,13 +1,11 @@
 #+feature using-stmt
 package barbarian
-import "core:strings"
 import "core:slice"
 import "core:time"
 import "core:fmt"
 import "core:c"
 import wl "wayland-odin/wayland"
 
-import gl "vendor:OpenGL"
 import "vendor:egl"
 import "vendor:nanovg"
 import nvgl "vendor:nanovg/gl"
@@ -90,7 +88,7 @@ monitor_mouse_motion :: proc(data: rawptr, state: ^State, pos_x: f32, pos_y: f32
 }
 monitor_mouse_scroll :: proc(data: rawptr, state: ^State, dir: int) {
     mon := cast(^Monitor)data
-    res_mod, item_index := monitor_get_mod_at(mon, state.mouse.pos_x, state.mouse.pos_y)
+    res_mod, _ := monitor_get_mod_at(mon, state.mouse.pos_x, state.mouse.pos_y)
     if res_mod != nil {
         send_event(res_mod, ModuleEvent { type = .Scroll, scroll = ScrollEvent { dir = dir }})
     }

@@ -1,5 +1,5 @@
 ./barbarian: *.odin ./wayland-odin/wayland/cursor_shape_v1.odin ./wayland-odin/wayland/tablet_v2.odin
-	odin build . -debug -error-pos-style:unix -out:$@ -linker:lld
+	odin build . -debug -error-pos-style:unix -vet -vet-packages:barbarian -out:$@ -linker:lld
 debug-barbarian: ./barbarian
 	gdb --args ./barbarian --config-path ./test_config.json5
 ./wayland-odin/scanner: ./wayland-odin/scanner.odin

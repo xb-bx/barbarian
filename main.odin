@@ -76,9 +76,9 @@ output_geometry :: proc "c" (
     model: cstring,
     transform: c.int32_t,
 ) {
-    st := transmute(^State)data
+    st := cast(^State)data
     context = st.ctx
-    monitor := get_or_create_monitor_for_output(st, wl_output)
+    _ = get_or_create_monitor_for_output(st, wl_output)
 }
 
 output_mode :: proc "c" (
@@ -89,7 +89,7 @@ output_mode :: proc "c" (
     height: c.int32_t,
     refresh: c.int32_t,
 ) {
-    st := transmute(^State)data
+    st := cast(^State)data
     context = st.ctx
     monitor := get_or_create_monitor_for_output(st, wl_output)
     monitor.geom_changed = monitor.geom_changed || monitor.surface.w != int(width)
@@ -97,18 +97,18 @@ output_mode :: proc "c" (
     monitor.surface.h = int(st.height)
 }
 output_done  :: proc "c" (data: rawptr, wl_output: ^wl.wl_output) {
-    st := transmute(^State)data
+    st := cast(^State)data
     context = st.ctx
-    monitor := get_or_create_monitor_for_output(st, wl_output)
+    _ = get_or_create_monitor_for_output(st, wl_output)
 }
 output_scale :: proc "c" (data: rawptr, wl_output: ^wl.wl_output, factor: c.int32_t) {
-    st := transmute(^State)data
+    st := cast(^State)data
     context = st.ctx
     monitor := get_or_create_monitor_for_output(st, wl_output)
     monitor.surface.scale = int(factor)
 }
 output_name  :: proc "c" (data: rawptr, wl_output: ^wl.wl_output, name: cstring) {
-    st := transmute(^State)data
+    st := cast(^State)data
     context = st.ctx
     monitor := get_or_create_monitor_for_output(st, wl_output)
     monitor.name = strings.clone_from_cstring(name)
@@ -318,7 +318,7 @@ pointer_listener: wl.wl_pointer_listener = {
 	) {
     },
     
-    frame = proc "c" (data: rawptr, wl_pointer: ^wl.wl_pointer) {}
+    frame = proc "c" (data: rawptr, wl_pointer: ^wl.wl_pointer) {},
 }
 seat_listener: wl.wl_seat_listener = {
     capabilities = proc "c" (data: rawptr, wl_seat: ^wl.wl_seat, capabilities: c.uint32_t) {
@@ -336,7 +336,7 @@ seat_listener: wl.wl_seat_listener = {
     name = proc "c" (data: rawptr, wl_seat: ^wl.wl_seat, name: cstring) {
         context = runtime.default_context()
         fmt.println("seat name:", name)
-    }
+    },
 
 }
 xdg_listener := wl.xdg_wm_base_listener {
@@ -346,7 +346,7 @@ xdg_listener := wl.xdg_wm_base_listener {
 		serial: c.uint32_t,
 	) {
         wl.xdg_wm_base_pong(xdg_wm_base, serial)
-    }
+    },
 }
 global :: proc "c" (
     data: rawptr,
@@ -366,26 +366,21 @@ global :: proc "c" (
                 &wl.wl_compositor_interface,
                 version,
             ))
-    }
-    if interface == wl.wl_shm_interface.name {
+    } else if interface == wl.wl_shm_interface.name {
         state.shm =
         cast(^wl.wl_shm)(wl.wl_registry_bind(registry, name, &wl.wl_shm_interface, version))
-    }
-    if interface == wl.wl_output_interface.name {
+    } else if interface == wl.wl_output_interface.name {
         output := cast(^wl.wl_output)wl.wl_registry_bind(registry, name, &wl.wl_output_interface, version)
         wl.wl_output_add_listener(output, &output_listener, state)
         mon := get_or_create_monitor_for_output(state, output)
         mon.wl_name = name
-    }
-    if interface == wl.wl_seat_interface.name {
+    } else if interface == wl.wl_seat_interface.name {
         state.seat = cast(^wl.wl_seat)wl.wl_registry_bind(registry, name, &wl.wl_seat_interface, version)
         wl.wl_seat_add_listener(state.seat, &seat_listener, state)
-    }
-    if interface == wl.xdg_wm_base_interface.name {
+    } else if interface == wl.xdg_wm_base_interface.name {
         state.xdg_wm_base = cast(^wl.xdg_wm_base)wl.wl_registry_bind(registry, name, &wl.xdg_wm_base_interface, version)
         wl.xdg_wm_base_add_listener(state.xdg_wm_base, &xdg_listener, state)
-    }
-    if interface == wl.zwlr_layer_shell_v1_interface.name {
+    } else if interface == wl.zwlr_layer_shell_v1_interface.name {
         state.layer_shell =
         cast(^wl.zwlr_layer_shell_v1)(wl.wl_registry_bind(
                 registry,
@@ -393,8 +388,7 @@ global :: proc "c" (
                 &wl.zwlr_layer_shell_v1_interface,
                 version,
             ))
-    }
-    if interface == wl.wp_cursor_shape_manager_v1_interface.name {
+    } else if interface == wl.wp_cursor_shape_manager_v1_interface.name {
         state.cursor_manager =
         cast(^wl.wp_cursor_shape_manager_v1)(wl.wl_registry_bind(
                 registry,
@@ -441,7 +435,7 @@ layer_listener:  wl.zwlr_layer_surface_v1_listener = {
         zwlr_layer_surface_v1: ^wl.zwlr_layer_surface_v1,
     ) {
 
-    }
+    },
 }
 prepare_poll_fds :: proc(pollfds: ^[dynamic]posix.pollfd, state: ^State) {
     clear(pollfds)
@@ -557,7 +551,8 @@ main :: proc() {
                 if (!egl.MakeCurrent(state.rctx.display, monitor.surface.egl_surface, monitor.surface.egl_surface, state.rctx.ctx)) {
                     fmt.println("Error making current!")
                     return
-                }
+                } 
+
                 {
                     gl.ClearColor(f32(state.bg.r)/255.0, f32(state.bg.g)/255.0, f32(state.bg.b)/255.0, f32(state.bg.a)/255.0)
                     gl.Clear(gl.COLOR_BUFFER_BIT)

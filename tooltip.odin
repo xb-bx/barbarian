@@ -8,7 +8,6 @@ import "vendor:nanovg"
 
 import gl   "vendor:OpenGL"
 import nvgl "vendor:nanovg/gl"
-import wl   "wayland-odin/wayland"
 
 TOOLTIP_DELAY     :: time.Millisecond * 500
 TOOLTIP_PAD       :: 4
@@ -75,9 +74,9 @@ tooltip_render :: proc(tooltip: ^Tooltip, state: ^State) {
         text := tooltip.text
         rows: []nanovg.Text_Row = make([]nanovg.Text_Row, lines)
         defer delete(rows)
-        nrows, last, ok := nanovg.TextBreakLines(ctx, &text, TOOLTIP_MAX_WIDTH, &rows)
+        nrows, _, _ := nanovg.TextBreakLines(ctx, &text, TOOLTIP_MAX_WIDTH, &rows)
         pos := f32(TOOLTIP_PAD)
-        for row,i in rows[:nrows] {
+        for row, _ in rows[:nrows] {
             line := tooltip.text[row.start:row.end]
             bounds := [4]f32{}
             nanovg.TextBounds(ctx, 0, 0, line, &bounds)

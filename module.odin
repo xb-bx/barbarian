@@ -140,7 +140,7 @@ hex_to_color :: proc(hex: string) -> (Color, bool) {
     if len(hex) < 8 do return {}, false
     res := Color {}
     hex := hex
-    bytes := transmute([^]byte)&res
+    bytes := cast([^]byte)&res
     for i in 0..<4 {
         num, ok := strconv.parse_uint(hex[:2], 16)
         if !ok do return {}, false
