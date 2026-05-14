@@ -63,6 +63,10 @@ Look for examples in [./example-modules](https://github.com/xb-bx/barbarian/tree
 - [x] Test multiple monitors
 - [X] Scaling
 
+# Dependencies
+- odin compiler
+- wayland
+- egl
 
 # Installation
 ## Arch-based distros
