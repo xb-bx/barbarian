@@ -5,8 +5,8 @@ import "core:c"
 import "core:strings"
 import "core:os"
 import "core:time"
-import "core:fmt"
 import "core:flags"
+import "core:log"
 import "core:slice"
 import "wayland-odin/render"
 
@@ -110,7 +110,7 @@ output_name  :: proc "c" (data: rawptr, wl_output: ^wl.wl_output, name: cstring)
     context = st.ctx
     monitor := get_or_create_monitor_for_output(st, wl_output)
     monitor.name = strings.clone_from_cstring(name)
-    fmt.println("output:", name)
+    log.debugf("output: %s", name)
 }
 output_description :: proc "c" (data: rawptr, wl_output: ^wl.wl_output, description: cstring) {
 
@@ -353,7 +353,7 @@ global :: proc "c" (
 ) {
     state: ^State = cast(^State)data
     context = state.ctx
-    fmt.println("inteface", interface)
+    log.debugf("interface: %s", interface)
     if interface == wl.wl_compositor_interface.name {
         state.compositor =
         cast(^wl.wl_compositor)(wl.wl_registry_bind(
@@ -421,7 +421,7 @@ global_remove :: proc "c" (data: rawptr, registry: ^wl.wl_registry, name: c.uint
             break
         }
     }
-    fmt.println("remove", name)
+    log.debugf("global remove: %d", name)
 }
 
 registry_listener := wl.wl_registry_listener {
@@ -445,20 +445,24 @@ prepare_poll_fds :: proc(pollfds: ^[dynamic]posix.pollfd, state: ^State) {
 PAD := f32(4)
 CliOpts :: struct {
     config_path: string `usage:"Set config path"`,
+    verbose: bool `usage:"Enable verbose logging"`,
 } 
 main :: proc() {
     opts: CliOpts = {}
     flags.parse_or_exit(&opts, os.args, .Unix)
+    log_level := log.Level.Warning if !opts.verbose else log.Level.Debug
+    logger := log.create_console_logger(log_level)
+    context.logger = logger
     state: State = {}
     state.ctx = context
     cfg, err := load_config(opts.config_path)
     if err != nil {
-        fmt.eprintln("ERROR while loading config:", err)
+        log.errorf("while loading config: %v", err)
         os.exit(1)
     }
     fontdata, os_err := os.read_entire_file_from_path(cfg.font, context.allocator)
     if os_err != nil {
-        fmt.eprintln("ERROR while loading font:", os_err)
+        log.errorf("while loading font: %v", os_err)
         os.exit(1)
     }
     state.height = cfg.height
@@ -492,7 +496,7 @@ main :: proc() {
         time.sleep(10 * time.Millisecond)
     }
     wl.display_roundtrip(display)
-    fmt.println(len(state.monitors), "outputs")
+    log.debugf("%d outputs", len(state.monitors))
 
     state.cursor_device = wl.wp_cursor_shape_manager_v1_get_pointer(state.cursor_manager, wl.wl_seat_get_pointer(state.seat))
 
@@ -507,7 +511,7 @@ main :: proc() {
 
     for monitor in state.monitors {
         if (!egl.MakeCurrent(state.rctx.display, monitor.surface.egl_surface, monitor.surface.egl_surface, state.rctx.ctx)) {
-            fmt.println("Error making current!")
+            log.error("Error making current")
             return
         }
         monitor.surface.nvg_ctx = nvgl.Create({ .ANTI_ALIAS })
@@ -517,7 +521,7 @@ main :: proc() {
     wl.display_roundtrip(display)
     for output, out_config in cfg.outputs {
         monitor := get_monitor_by_name(&state, output) 
-        if monitor == nil  { fmt.eprintln("WARN: No output", output); continue }
+        if monitor == nil  { log.warnf("No output: %s", output); continue }
         init_modules(&monitor.left, cfg, out_config.modules_left)
         init_modules(&monitor.right, cfg, out_config.modules_right)
     }
@@ -545,7 +549,7 @@ main :: proc() {
             if monitor.surface.rescale do surface_rescale(&monitor.surface)
             if monitor.surface.redraw && monitor.surface.swap {
                 if (!egl.MakeCurrent(state.rctx.display, monitor.surface.egl_surface, monitor.surface.egl_surface, state.rctx.ctx)) {
-                    fmt.println("Error making current!")
+                    log.error("Error making current")
                     return
                 } 
 
@@ -601,7 +605,7 @@ main :: proc() {
         wl_display_prepare_read(display)
         res := posix.poll(slice.as_ptr(pollfds[:]), u64(len(pollfds)), timeout)
         if res == -1 {
-            fmt.println("ERROR:", posix.strerror(posix.errno()))
+            log.errorf("poll: %s", posix.strerror(posix.errno()))
         }
         if state.tooltip != nil && !state.tooltip.displayed {
             if tooltip_get_time_to_show(state.tooltip) <= 0 {
@@ -615,7 +619,7 @@ main :: proc() {
             for mod in monitor_iter(&mon_iter) {
                 if mod.stopped do continue
                 if .HUP in pollfds[mod.pollfd_index].revents || mod.pid == pid {
-                    fmt.printfln("module(PID %i) %v died", pid, mod.exec)
+                    log.warnf("module(PID %d) %v died", pid, mod.exec)
                     mod.stopped = true
                     posix.close(mod.pipe_out)
                     posix.close(mod.pipe_in)

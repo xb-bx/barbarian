@@ -2,7 +2,7 @@
 package barbarian
 import "core:slice"
 import "core:time"
-import "core:fmt"
+import "core:log"
 import "core:c"
 import wl "wayland-odin/wayland"
 
@@ -186,7 +186,7 @@ init_modules :: proc(modules_out: ^[]Module, cfg: ^Config, modules: []string) {
     for module in modules {
         mod_cfg, ok := cfg.modules[module]
         if !ok { 
-            fmt.eprintln("ERROR: No module", module)
+            log.errorf("No module: %s", module)
             continue
         }
         append(&mods, Module {
@@ -198,7 +198,7 @@ init_modules :: proc(modules_out: ^[]Module, cfg: ^Config, modules: []string) {
     modules_out ^= mods[:]
     for &mod in modules_out^ {
         err := module_run(&mod)
-        if err != nil do fmt.eprintln("ERROR: Failed to run module", mod.exec)
+        if err != nil do log.errorf("Failed to run module: %v", mod.exec)
     }
 }
 monitor_reload :: proc(state: ^State, cfg: ^Config, monitor: ^Monitor) {
@@ -219,7 +219,7 @@ monitor_reload :: proc(state: ^State, cfg: ^Config, monitor: ^Monitor) {
     surface_init(&monitor.surface, monitor.output, state, monitor.surface.logical_w, monitor.surface.logical_h, LayerSurface{})
 
     if (!egl.MakeCurrent(state.rctx.display, monitor.surface.egl_surface, monitor.surface.egl_surface, state.rctx.ctx)) {
-        fmt.println("Error making current!")
+        log.error("Error making current")
         return
     }
     monitor.surface.nvg_ctx = nvgl.Create({.DEBUG, .ANTI_ALIAS})

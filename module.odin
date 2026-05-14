@@ -6,7 +6,7 @@ import "core:strconv"
 import "core:slice"
 import "core:bufio"
 import "core:os"
-import "core:fmt"
+import "core:log"
 import "vendor:nanovg"
 foreign import clib "system:c"
 PR_SET_PDEATHSIG :: 1
@@ -132,7 +132,6 @@ module_run :: proc(module: ^Module) -> posix.Errno {
     }
     posix.fcntl(pipes_in[1], .SETFL, posix.fcntl(pipes_in[1], .GETFL, 0) | posix.O_NONBLOCK)
     module.file_out = os.new_file(uintptr(pipes_out[0]), "module_input")
-    fmt.println(module.file_out)
     bufio.reader_init(&module.rd, os.to_reader(module.file_out))
     return nil
 }
@@ -170,12 +169,12 @@ send_event :: proc(module: ^Module, event: ModuleEvent) {
     strings.builder_init(&b)
     opt := json.Marshal_Options {pretty = false, spec = .JSON, use_enum_names = true, }
     err := json.marshal_to_builder(&b, event, &opt)
-    if err != nil { fmt.eprintln(err); panic("err") }
+    if err != nil { log.errorf("marshal event: %v", err); panic("err") }
     strings.write_rune(&b, '\n')
 
     res := posix.write(module.pipe_in, slice.as_ptr(b.buf[:]), len(b.buf))
     if res == -1 {
-        fmt.eprintln("WARN: Could not send event to module", posix.errno())
+        log.warnf("Could not send event to module: %v", posix.errno())
     }
 }
 calculate_width :: proc(module: ^Module, ctx: ^nanovg.Context, ignore_min: bool = false) -> f32 {
@@ -212,7 +211,6 @@ module_render :: proc(mod: ^Module, surface: ^Surface, state: ^State, ctx: ^nano
         nanovg.TextAlign(ctx, .CENTER, .MIDDLE)
         adv := nanovg.TextBounds(ctx, 0, height, item.text, &bounds)
         text_width := adv
-        // text_height := bounds[3]-bounds[1]
         width := text_width + pad*2
 
         nanovg.FillColor(ctx, nanovg.RGBA(item.bgColor.r, item.bgColor.g, item.bgColor.b,item.bgColor.a))
@@ -232,7 +230,7 @@ module_render :: proc(mod: ^Module, surface: ^Surface, state: ^State, ctx: ^nano
 process_input :: proc(module: ^Module, state: ^State) {
     line, err := bufio.reader_read_string(&module.rd, '\n')
     if err != nil {
-        fmt.eprintln("ERROR: while reading module input", err) 
+        log.errorf("while reading module input: %v", err) 
     }
     defer delete(line)
     input: ModuleInput = {}
@@ -253,12 +251,12 @@ process_input :: proc(module: ^Module, state: ^State) {
             ok := false
             item.fgColor, ok = hex_to_color(item.fg)
             if !ok {
-                if item.fg != "" do fmt.eprintln("WARN: received invalid color", item.fg)
+                if item.fg != "" do log.warnf("received invalid color: %s", item.fg)
                 item.fgColor = state.fg
             } 
             item.bgColor, ok = hex_to_color(item.bg)
             if !ok {
-                if item.bg != "" do fmt.eprintln("WARN: received invalid color", item.bg)
+                if item.bg != "" do log.warnf("received invalid color: %s", item.bg)
                 item.bgColor = state.bg
             } 
         } 
@@ -268,7 +266,6 @@ process_input :: proc(module: ^Module, state: ^State) {
     } 
     if input.menu != nil {
         menu := input.menu.(ModuleMenu)
-        fmt.println(menu)
         if module.current_input.menu != nil do delete_menu(module.current_input.menu.(ModuleMenu))
         module.current_input.menu = menu
     }

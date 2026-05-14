@@ -1,10 +1,11 @@
 package barbarian
-import "core:fmt"
+import "core:log"
 import "core:c"
 import "core:os"
 import "vendor:egl"
 import "vendor:nanovg"
 import wl   "wayland-odin/wayland"
+WAYLAND_BASE_SCALE :: 120
 
 Surface :: struct {
     w:              int,
@@ -85,13 +86,13 @@ layer_listener:  wl.zwlr_layer_surface_v1_listener = {
         height: c.uint32_t,
     ) {
         surface := cast(^Surface)data
-        context = {}
+        context = surface.state.ctx
         wl.zwlr_layer_surface_v1_ack_configure(zwlr_layer_surface_v1, serial)
         width := int(width)
         height := int(height)
         if surface.logical_w != width do surface.rescale = true
         if surface.logical_h != height do surface.rescale = true
-        fmt.println(surface.logical_h, surface.logical_w, height, width)
+        log.debugf("layer configure: %dx%d -> %dx%d", surface.logical_w, surface.logical_h, width, height)
         surface.logical_w = width
         surface.logical_h = height
         
@@ -119,9 +120,9 @@ surface_init_popup :: proc(surface: ^Surface, state: ^State, opts: PopupSurface)
     surface.xdg_positioner = wl.xdg_wm_base_create_positioner(state.xdg_wm_base)
     surface.prefered_scale = opts.parent_scale
 
-    surface.scale = f32(surface.prefered_scale) / f32(120)
-    surface.w = (surface.logical_w * surface.prefered_scale + 119) / 120
-    surface.h = (surface.logical_h * surface.prefered_scale + 119) / 120
+    surface.scale = f32(surface.prefered_scale) / f32(WAYLAND_BASE_SCALE)
+    surface.w = (surface.logical_w * surface.prefered_scale + 119) / WAYLAND_BASE_SCALE
+    surface.h = (surface.logical_h * surface.prefered_scale + 119) / WAYLAND_BASE_SCALE
 
     wl.xdg_positioner_set_size(surface.xdg_positioner, i32(surface.logical_w), i32(surface.logical_h))
     wl.xdg_positioner_set_anchor_rect(surface.xdg_positioner, 0, 0, i32(surface.logical_w), i32(surface.logical_h))
@@ -160,7 +161,7 @@ surface_init :: proc(surface: ^Surface, output: ^wl.wl_output, state: ^State, w:
     surface.h = h
     surface.logical_w = w
     surface.logical_h = h
-    surface.prefered_scale = 120
+    surface.prefered_scale = WAYLAND_BASE_SCALE
     surface.font_size = state.font_size
     surface.scale = 1
 
@@ -182,8 +183,7 @@ surface_init :: proc(surface: ^Surface, output: ^wl.wl_output, state: ^State, w:
         nil,
     )
     if surface.egl_surface == egl.NO_SURFACE {
-        fmt.println("Error creating window surface")
-        os.exit(1)
+        panic("Error creating window surface")
     }
     surface.wp_scale = wl.wp_fractional_scale_manager_v1_get_fractional_scale(state.scale_manager, surface.wl_surface)
     wl.wp_fractional_scale_v1_add_listener(surface.wp_scale, &scale_listener, surface)
@@ -195,11 +195,10 @@ surface_init :: proc(surface: ^Surface, output: ^wl.wl_output, state: ^State, w:
     surface.swap = true
 }
 surface_rescale :: proc (surface: ^Surface) {
-    surface.scale = f32(surface.prefered_scale) / f32(120)
-    surface.w = (surface.logical_w * surface.prefered_scale + 119) / 120
-    surface.h = (surface.logical_h * surface.prefered_scale + 119) / 120
+    surface.scale = f32(surface.prefered_scale) / f32(WAYLAND_BASE_SCALE)
+    surface.w = (surface.logical_w * surface.prefered_scale + 119) / WAYLAND_BASE_SCALE
+    surface.h = (surface.logical_h * surface.prefered_scale + 119) / WAYLAND_BASE_SCALE
     wl.egl_window_resize(surface.egl_window, i32(surface.w), i32(surface.h), 0, 0)
-    // wl.zwlr_layer_surface_v1_set_size(surface.layer_surface, 0, u32(surface.h))
     if surface.xdg_positioner != nil {
         wl.xdg_positioner_set_size(surface.xdg_positioner, i32(surface.logical_w), i32(surface.logical_h))
         wl.xdg_positioner_set_anchor_rect(surface.xdg_positioner, 0, 0, i32(surface.logical_w), i32(surface.logical_h))
@@ -226,8 +225,7 @@ surface_create_frame_callback :: proc(surface: ^Surface) {
 surface_swap :: proc(surface: ^Surface) {
     state := surface.state
     if (!egl.MakeCurrent(state.rctx.display, surface.egl_surface, surface.egl_surface, state.rctx.ctx)) {
-        fmt.println("Error making current!")
-        return
+        panic("Error making current")
     }
     egl.SwapBuffers(state.rctx.display, surface.egl_surface)
     surface_create_frame_callback(surface)
