@@ -182,47 +182,52 @@ calculate_width :: proc(module: ^Module, ctx: ^nanovg.Context, ignore_min: bool 
     if module.current_input.items == nil do return 0
     sum := f32(0)
     items := module.current_input.items.([]ModuleItem)
+    pad := PAD
     for item in items {
         bounds := [4]f32 {}
         nanovg.TextAlign(ctx, .CENTER, .BASELINE)
         adv := nanovg.TextBounds(ctx, 0, 0, item.text, &bounds)
         text_width := adv
-        width := text_width + PAD*2
+        width := text_width + pad*2
         sum += width
     }
     if ignore_min do return sum
     return max(sum, module.min_width)
 }
-module_render :: proc(mod: ^Module, state: ^State, ctx: ^nanovg.Context, x: f32) -> f32 {
+module_render :: proc(mod: ^Module, surface: ^Surface, state: ^State, ctx: ^nanovg.Context, x: f32) -> f32 {
     if mod.current_input.items == nil do return 0
     calced_width := calculate_width(mod, ctx, true)
     x := x
-    if calced_width < mod.min_width {
-        x += (mod.min_width - calced_width) /  2    
+    min_width := mod.min_width
+    if calced_width < min_width {
+        x += (min_width - calced_width) /  2    
     }
+    // calced_width /= surface.scale
     items := &mod.current_input.items.([]ModuleItem)
+    height := f32(surface.logical_h)
+    pad := PAD
     for _, i in items {
         item := &items[i]
         bounds := [4]f32 {}
-        nanovg.TextAlign(ctx, .LEFT, .BASELINE)
-        adv := nanovg.TextBounds(ctx, 0, state.height, item.text, &bounds)
+        nanovg.TextAlign(ctx, .CENTER, .MIDDLE)
+        adv := nanovg.TextBounds(ctx, 0, height, item.text, &bounds)
         text_width := adv
-        text_height := bounds[3]-bounds[1]
-        width := text_width + PAD*2
+        // text_height := bounds[3]-bounds[1]
+        width := text_width + pad*2
 
         nanovg.FillColor(ctx, nanovg.RGBA(item.bgColor.r, item.bgColor.g, item.bgColor.b,item.bgColor.a))
         nanovg.BeginPath(ctx)
-        nanovg.Rect(ctx, x, 0, width, state.height)
+        nanovg.Rect(ctx, x, 0, width, height)
         nanovg.Fill(ctx)
 
         nanovg.FillColor(ctx, nanovg.RGBA(item.fgColor.r, item.fgColor.g, item.fgColor.b,item.fgColor.a))
-        nanovg.Text(ctx, x + PAD, state.height + (state.height-text_height)/2 - bounds[1], item.text)
+        nanovg.Text(ctx, x + width / 2, height/2, item.text)
         item.pos = x
         
         item.width = width
         x += width
     }
-    return max(x, mod.min_width)
+    return max(x, min_width)
 }
 process_input :: proc(module: ^Module, state: ^State) {
     line, err := bufio.reader_read_string(&module.rd, '\n')

@@ -61,7 +61,7 @@ Example module input:
 Look for examples in [./example-modules](https://github.com/xb-bx/barbarian/tree/master/example-modules)
 ## TODO:
 - [x] Test multiple monitors
-- [ ] Scaling
+- [X] Scaling
 
 
 # Installation

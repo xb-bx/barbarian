@@ -39,6 +39,8 @@ State :: struct {
     cursor_device:  ^wl.wp_cursor_shape_device_v1,
     shm:            ^wl.wl_shm,
     seat:           ^wl.wl_seat,
+    scale_manager:  ^wl.wp_fractional_scale_manager_v1,
+    viewporter:     ^wl.wp_viewporter,
     monitors:       [dynamic]^Monitor,
     ctx:            runtime.Context,
     rctx:           render.RenderContext,
@@ -69,8 +71,8 @@ output_geometry :: proc "c" (
     wl_output: ^wl.wl_output,
     x: c.int32_t,
     y: c.int32_t,
-    physical_width: c.int32_t,
-    physical_height: c.int32_t,
+    width: c.int32_t,
+    height: c.int32_t,
     subpixel: c.int32_t,
     make: cstring,
     model: cstring,
@@ -92,9 +94,9 @@ output_mode :: proc "c" (
     st := cast(^State)data
     context = st.ctx
     monitor := get_or_create_monitor_for_output(st, wl_output)
-    monitor.geom_changed = monitor.geom_changed || monitor.surface.w != int(width)
-    monitor.surface.w = int(width)
-    monitor.surface.h = int(st.height)
+    monitor.geom_changed = monitor.geom_changed || monitor.surface.logical_w != int(width)
+    monitor.surface.logical_w = int(width)
+    monitor.surface.logical_h = int(st.height)
 }
 output_done  :: proc "c" (data: rawptr, wl_output: ^wl.wl_output) {
     st := cast(^State)data
@@ -102,10 +104,6 @@ output_done  :: proc "c" (data: rawptr, wl_output: ^wl.wl_output) {
     _ = get_or_create_monitor_for_output(st, wl_output)
 }
 output_scale :: proc "c" (data: rawptr, wl_output: ^wl.wl_output, factor: c.int32_t) {
-    st := cast(^State)data
-    context = st.ctx
-    monitor := get_or_create_monitor_for_output(st, wl_output)
-    monitor.surface.scale = int(factor)
 }
 output_name  :: proc "c" (data: rawptr, wl_output: ^wl.wl_output, name: cstring) {
     st := cast(^State)data
@@ -334,8 +332,6 @@ seat_listener: wl.wl_seat_listener = {
         }
     }, 
     name = proc "c" (data: rawptr, wl_seat: ^wl.wl_seat, name: cstring) {
-        context = runtime.default_context()
-        fmt.println("seat name:", name)
     },
 
 }
@@ -396,6 +392,22 @@ global :: proc "c" (
                 &wl.wp_cursor_shape_manager_v1_interface,
                 version,
             ))
+    } else if interface == wl.wp_fractional_scale_manager_v1_interface.name {
+        state.scale_manager =
+        cast(^wl.wp_fractional_scale_manager_v1)(wl.wl_registry_bind(
+                registry,
+                name,
+                &wl.wp_fractional_scale_manager_v1_interface,
+                version,
+            ))
+    } else if interface == wl.wp_viewporter_interface.name {
+        state.viewporter =
+        cast(^wl.wp_viewporter)(wl.wl_registry_bind(
+                registry,
+                name,
+                &wl.wp_viewporter_interface,
+                version,
+            ))
     }
 }
 
@@ -418,25 +430,6 @@ registry_listener := wl.wl_registry_listener {
 }
 
 
-layer_listener:  wl.zwlr_layer_surface_v1_listener = {
-    configure = proc "c" (
-        data: rawptr,
-        zwlr_layer_surface_v1: ^wl.zwlr_layer_surface_v1,
-        serial: c.uint32_t,
-        width: c.uint32_t,
-        height: c.uint32_t,
-    ) {
-        context = runtime.default_context()
-        wl.zwlr_layer_surface_v1_ack_configure(zwlr_layer_surface_v1, serial)
-        
-    },
-    closed = proc "c" (
-        data: rawptr,
-        zwlr_layer_surface_v1: ^wl.zwlr_layer_surface_v1,
-    ) {
-
-    },
-}
 prepare_poll_fds :: proc(pollfds: ^[dynamic]posix.pollfd, state: ^State) {
     clear(pollfds)
     append(pollfds, posix.pollfd { fd = posix.FD(state.display.fd), events = {.IN} })
@@ -449,7 +442,7 @@ prepare_poll_fds :: proc(pollfds: ^[dynamic]posix.pollfd, state: ^State) {
         }
     }
 }
-PAD :: 3.5
+PAD := f32(4)
 CliOpts :: struct {
     config_path: string `usage:"Set config path"`,
 } 
@@ -506,7 +499,7 @@ main :: proc() {
     state.rctx = init_egl(display)
     gl.load_up_to(int(4), 5, egl.gl_set_proc_address)
     for monitor in state.monitors {
-        surface_init(&monitor.surface, monitor.output, &state, monitor.surface.w, monitor.surface.h, LayerSurface{})
+        surface_init(&monitor.surface, monitor.output, &state, monitor.surface.logical_w, monitor.surface.logical_h, LayerSurface{})
         monitor.geom_changed = false
     }
     wl.display_roundtrip(display)
@@ -517,7 +510,7 @@ main :: proc() {
             fmt.println("Error making current!")
             return
         }
-        monitor.surface.nvg_ctx = nvgl.Create({.DEBUG, .ANTI_ALIAS})
+        monitor.surface.nvg_ctx = nvgl.Create({ .ANTI_ALIAS })
         nanovg.CreateFontMem(monitor.surface.nvg_ctx, "sans", state.font, false)
         monitor.surface.redraw = true
     }
@@ -532,12 +525,14 @@ main :: proc() {
     wl.display_roundtrip(display)
     for {
         if state.menu != nil {
+            if state.menu.surface.rescale do surface_rescale(&state.menu.surface)
             if state.menu.rerender && state.menu.surface.swap {
                 menu_render(state.menu)
                 surface_swap(&state.menu.surface)
             }
         }
         if state.tooltip != nil {
+            if state.tooltip.surface.rescale do surface_rescale(&state.tooltip.surface)
             if state.tooltip.rerender && tooltip_get_time_to_show(state.tooltip) <= 0  && (state.tooltip.surface.swap || !state.tooltip.displayed) {
                 tooltip_render(state.tooltip, &state)
                 surface_swap(&state.tooltip.surface)
@@ -547,6 +542,7 @@ main :: proc() {
             if monitor.geom_changed {
                 monitor_reload(&state, cfg, monitor)
             }
+            if monitor.surface.rescale do surface_rescale(&monitor.surface)
             if monitor.surface.redraw && monitor.surface.swap {
                 if (!egl.MakeCurrent(state.rctx.display, monitor.surface.egl_surface, monitor.surface.egl_surface, state.rctx.ctx)) {
                     fmt.println("Error making current!")
@@ -558,36 +554,35 @@ main :: proc() {
                     gl.Clear(gl.COLOR_BUFFER_BIT)
                     gl.Viewport(0, 0, i32(monitor.surface.w), i32(monitor.surface.h))
                     ctx := monitor.surface.nvg_ctx
-                    nanovg.BeginFrame(ctx, f32(monitor.surface.w), f32(monitor.surface.h), 1)
+                    surface := &monitor.surface
+                    nanovg.BeginFrame(ctx, f32(monitor.surface.logical_w), f32(monitor.surface.logical_h), surface.scale)
                     defer nanovg.EndFrame(ctx)
                     nanovg.FontSize(ctx, state.font_size)
                     nanovg.FontFaceId(ctx, 0)
                     x := f32(0)
                     for &mod, i in monitor.left {
                         if mod.current_input.items == nil do continue
-                        x = module_render(&mod, &state, ctx, x)
+                        x = module_render(&mod, surface, &state, ctx, x)
                         if i != len(monitor.left) - 1 {
                             nanovg.BeginPath(ctx)
                             nanovg.FillColor(ctx, nanovg.RGBA(255,255,255,255))
-                            nanovg.Rect(ctx, x, 0, 1, state.height)
+                            nanovg.Rect(ctx, x, 0, 1.0, f32(surface.logical_h))
                             nanovg.Fill(ctx)
-                            x+=2
+                            x += 1.0
                         }
                     }
-                    x = f32(monitor.surface.w)
+                    x = f32(monitor.surface.logical_w)
                     #reverse for &mod, i in monitor.right {
                         x -= calculate_width(&mod, ctx)
-                        module_render(&mod, &state, ctx, x)
+                        module_render(&mod, surface, &state, ctx, x)
                         if i != 0 {
-                            x-=2
+                            x -= 1.0
                             nanovg.BeginPath(ctx)
                             nanovg.FillColor(ctx, nanovg.RGBA(255,255,255,255))
-                            nanovg.Rect(ctx, x, 0, 1, state.height)
+                            nanovg.Rect(ctx, x, 0, 1.0, f32(surface.logical_h))
                             nanovg.Fill(ctx)
                         }
                     }
-                    
-                    
                 }
 
                 surface_swap(&monitor.surface)

@@ -46,7 +46,7 @@ tooltip_render :: proc(tooltip: ^Tooltip, state: ^State) {
         pos_x  := tooltip.module.current_input.items.([]ModuleItem)[0].pos - PAD - 2
         mod_width := calculate_width(tooltip.module, ctx) + PAD * 2
         pos_x += (mod_width - width) / 2
-        surface_init(&tooltip.surface, tooltip.monitor.output, state, int(width), int(height), PopupSurface { int(pos_x), int(f32(tooltip.monitor.surface.h) + 5), tooltip.monitor.surface.layer_surface })
+        surface_init(&tooltip.surface, tooltip.monitor.output, state, int(width), int(height), PopupSurface { int(pos_x), int(f32(tooltip.monitor.surface.logical_h) + 5), tooltip.monitor.surface.layer_surface, tooltip.monitor.surface.prefered_scale })
     }
     ctx = tooltip.surface.nvg_ctx
 
@@ -59,7 +59,7 @@ tooltip_render :: proc(tooltip: ^Tooltip, state: ^State) {
     gl.Clear(gl.COLOR_BUFFER_BIT)
     gl.Viewport(0, 0, i32(tooltip.surface.w), i32(tooltip.surface.h))
     {
-        nanovg.BeginFrame(ctx, f32(tooltip.surface.w), f32(tooltip.surface.h), 1)
+        nanovg.BeginFrame(ctx, f32(tooltip.surface.logical_w), f32(tooltip.surface.logical_h), tooltip.surface.scale)
         defer nanovg.EndFrame(ctx)
         nanovg.BeginPath(ctx)
         nanovg.Rect(ctx, 0, 0, width, height)

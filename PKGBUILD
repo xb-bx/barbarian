@@ -1,5 +1,5 @@
 pkgname="barbarian"
-pkgver="1.0.4"
+pkgver="1.0.5"
 pkgrel="1"
 pkgdesc="Simple wayland status bar"
 arch=("x86_64")

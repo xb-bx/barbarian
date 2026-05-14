@@ -35,6 +35,7 @@ to_nvg_color :: proc(col: Color) -> nanovg.Color {
 menu_scroll :: proc(data: rawptr, state: ^State, dir: int) {}
 menu_motion :: proc(data: rawptr, state: ^State, pos_x: f32, pos_y: f32) {
     menu := cast(^Menu)data
+
     wl.wp_cursor_shape_device_v1_set_shape(state.cursor_device, 0, wl.WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_POINTER)
     new_hovered := int(pos_y / menu.item_height)
     menu.rerender = menu.hovered_item != new_hovered
@@ -48,15 +49,15 @@ menu_click  :: proc(data: rawptr, state: ^State, btn: MouseButton, serial: u32) 
     }
 }
 menu_init :: proc(menu: ^Menu, state: ^State, parent: ^Monitor, items: ModuleMenu, cb: proc(data: rawptr, index: int), cb_data: rawptr, nvg_ctx: ^nanovg.Context) {
-    nanovg.FontSize(nvg_ctx, state.font_size)
-    width := f32(MENU_MIN_WIDTH)
-    height := f32(MENU_TOPBOTTOM_PADDING * 2)
+    nanovg.FontSize(nvg_ctx, parent.surface.font_size)
+    width := f32(MENU_MIN_WIDTH) 
+    height := f32(MENU_TOPBOTTOM_PADDING)  * 2
     menu.state = state
     menu.handler.data   = menu
     menu.handler.motion = menu_motion
     menu.handler.scroll = menu_scroll
     menu.handler.click  = menu_click
-    menu.item_height = state.font_size + MENU_VPADDING * 2
+    menu.item_height = parent.surface.font_size + MENU_VPADDING * 2
     for item in items.items {
         bounds: [4]f32 = {}
         nanovg.TextBounds(nvg_ctx, 0, 0, item.value, &bounds)
@@ -64,18 +65,18 @@ menu_init :: proc(menu: ^Menu, state: ^State, parent: ^Monitor, items: ModuleMen
         height += menu.item_height
         if new_width > width do width = new_width
     }
-    if width > MENU_MAX_WIDTH do width = MENU_MAX_WIDTH
+    width = min(width, MENU_MAX_WIDTH)
     menu.selected_cb = cb
     menu.cb_data = cb_data
     menu.items = items
     menu.hovered_item = -1
     menu.parent = parent
-    surface_init(&menu.surface, parent.output, state, int(math.ceil(width)), int(math.ceil(height)), PopupSurface { int(state.mouse.pos_x - 5), int(state.mouse.pos_y-5), parent.surface.layer_surface})
+    surface_init(&menu.surface, parent.output, state, int(math.ceil(width)), int(math.ceil(height)), PopupSurface { int(state.mouse.pos_x - 5), int(state.mouse.pos_y-5), parent.surface.layer_surface, parent.surface.prefered_scale })
     if (!egl.MakeCurrent(menu.state.rctx.display, menu.surface.egl_surface, menu.surface.egl_surface, menu.state.rctx.ctx)) {
         fmt.println("Error making current!")
         return
     }
-    menu.surface.nvg_ctx = nvgl.Create({.DEBUG, .ANTI_ALIAS})
+    menu.surface.nvg_ctx = nvgl.Create({.ANTI_ALIAS})
     nanovg.CreateFontMem(menu.surface.nvg_ctx, "sans", state.font, false)
     wl.display_roundtrip(state.display)
     menu.rerender = true
@@ -91,17 +92,18 @@ menu_render :: proc(menu: ^Menu) {
     gl.ClearColor(f32(state.menu_bg.r)/255.0, f32(state.menu_bg.g)/255.0, f32(state.menu_bg.b)/255.0, f32(state.menu_bg.a)/255.0)
     gl.Clear(gl.COLOR_BUFFER_BIT)
     gl.Viewport(0, 0, i32(menu.surface.w), i32(menu.surface.h))
-    nanovg.BeginFrame(ctx ,f32(menu.surface.w), f32(menu.surface.h), 1)
+    nanovg.BeginFrame(ctx ,f32(menu.surface.logical_w), f32(menu.surface.logical_h), menu.surface.scale)
     defer nanovg.EndFrame(ctx)
-    y := f32(MENU_TOPBOTTOM_PADDING)
+    y := f32(MENU_TOPBOTTOM_PADDING) 
     nanovg.TextAlign(ctx, .LEFT, .BASELINE)
-    nanovg.FontSize(ctx, menu.state.font_size)
+    nanovg.FontSize(ctx, menu.surface.font_size)
     nanovg.FontFace(ctx, "sans")
+    item_height := menu.item_height
     for item,i in menu.items.items {
         text_color := to_nvg_color(menu.state.menu_fg)
         bg_color   := to_nvg_color(menu.state.menu_bg)
         bounds := [4]f32{}
-        nanovg.TextBounds(ctx, 0, menu.item_height, item.value, &bounds)
+        nanovg.TextBounds(ctx, 0, item_height, item.value, &bounds)
         text_height := bounds[3] - bounds[1]
 
         if i == menu.hovered_item {
@@ -111,13 +113,14 @@ menu_render :: proc(menu: ^Menu) {
         nanovg.FillColor(ctx, bg_color)
 
         nanovg.BeginPath(ctx)
-        nanovg.Rect(ctx, 0, y, f32(menu.surface.w), menu.item_height)
+        nanovg.Rect(ctx, 0, y, f32(menu.surface.logical_w), item_height)
         nanovg.Fill(ctx)
 
         nanovg.FillColor(ctx, text_color)
-        ypos := y + menu.item_height + (menu.item_height - text_height)/2 - bounds[1]
+        ypos := y + item_height + (item_height - text_height)/2 - bounds[1]
+        // ypos /= menu.surface.scale
         nanovg.Text(ctx, MENU_PADDING, ypos, item.value)
-        y += menu.item_height
+        y += item_height
     }
 }
 

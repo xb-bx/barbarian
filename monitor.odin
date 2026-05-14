@@ -216,7 +216,7 @@ monitor_reload :: proc(state: ^State, cfg: ^Config, monitor: ^Monitor) {
             }
         }
     }
-    surface_init(&monitor.surface, monitor.output, state, monitor.surface.w, monitor.surface.h, LayerSurface{})
+    surface_init(&monitor.surface, monitor.output, state, monitor.surface.logical_w, monitor.surface.logical_h, LayerSurface{})
 
     if (!egl.MakeCurrent(state.rctx.display, monitor.surface.egl_surface, monitor.surface.egl_surface, state.rctx.ctx)) {
         fmt.println("Error making current!")
