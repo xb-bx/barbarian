@@ -12,6 +12,8 @@ debug-barbarian: ./barbarian
 DESTDIR ?= /
 .PHONY: install
 .PHONY: release
+generate: $(GENERATED)
+	echo ok
 release: $(GENERATED)
 	odin build . -o:speed -out:./barbarian
 install: 
