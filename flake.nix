@@ -2,6 +2,7 @@
   description = "BARbarian - a simple wayland status bar";
 
   inputs = {
+    self.submodules = true;
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     utils.url = "github:numtide/flake-utils";
   };
