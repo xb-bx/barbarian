@@ -55,6 +55,10 @@
           buildInputs = with pkgs; [
             odin
             ols 
+            libGL
+            wayland
+            libxkbcommon
+
           ];
         };
       }

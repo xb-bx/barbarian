@@ -1,5 +1,6 @@
 package barbarian
 
+import "core:path/filepath"
 import "core:bufio"
 import "core:c"
 import "core:strings"
@@ -11,6 +12,7 @@ import "core:slice"
 import "wayland-odin/render"
 
 import "core:sys/posix"
+import "core:sys/linux"
 
 import "base:runtime"
 import "vendor:egl"
@@ -58,6 +60,7 @@ State :: struct {
     height:         f32,
     tooltip:        ^Tooltip,
     ctrl_pressed:   bool,
+    inotify_fd:     linux.Fd,
 }
 MouseHandler :: struct {
     data:   rawptr,
@@ -433,6 +436,7 @@ registry_listener := wl.wl_registry_listener {
 prepare_poll_fds :: proc(pollfds: ^[dynamic]posix.pollfd, state: ^State) {
     clear(pollfds)
     append(pollfds, posix.pollfd { fd = posix.FD(state.display.fd), events = {.IN} })
+    append(pollfds, posix.pollfd { fd = posix.FD(state.inotify_fd), events = {.IN} })
     for monitor in state.monitors {
         mon_iter := MonitorIterator {monitor = monitor}
         for mod in monitor_iter(&mon_iter) {
@@ -447,6 +451,27 @@ CliOpts :: struct {
     config_path: string `usage:"Set config path"`,
     verbose: bool `usage:"Enable verbose logging"`,
 } 
+get_config_path :: proc(config_path: string) -> string {
+    config_path := config_path
+    if config_path == "" {
+        config_path = os.get_env("XDG_CONFIG_HOME", context.temp_allocator)
+        if config_path == "" {
+            arr := [4]string{os.get_env("HOME", context.temp_allocator), ".config", "barbarian", "config.json5"}
+            config_path, _ = filepath.join(arr[:], context.temp_allocator)
+        } else {
+            arr := [3]string{config_path, "barbarian", "config.json5"}
+            config_path, _ = filepath.join(arr[:], context.temp_allocator)
+        }
+    } 
+    return config_path
+}
+inotify_iter :: proc(buf: ^[]u8) -> (linux.Inotify_Event, string, bool) {
+    if len(buf) == 0 do return  {}, "", false
+    event := cast(^linux.Inotify_Event)&buf[0]
+    name := string((transmute(cstring)&event.name))
+    buf ^= buf[size_of(linux.Inotify_Event)+event.len:]
+    return event^, name, true
+}
 main :: proc() {
     opts: CliOpts = {}
     flags.parse_or_exit(&opts, os.args, .Unix)
@@ -455,7 +480,8 @@ main :: proc() {
     context.logger = logger
     state: State = {}
     state.ctx = context
-    cfg, err := load_config(opts.config_path)
+    config_path := get_config_path(opts.config_path)
+    cfg, err := load_config(config_path)
     if err != nil {
         log.errorf("while loading config: %v", err)
         os.exit(1)
@@ -465,6 +491,19 @@ main :: proc() {
         log.errorf("while loading font: %v", os_err)
         os.exit(1)
     }
+    fd, inot_err := linux.inotify_init1({.NONBLOCK})
+    if inot_err != .NONE {
+        log.errorf("couldnt initialize inotify", inot_err)
+        os.exit(1)
+    }
+    watch_dir := filepath.dir(config_path)
+    config_file_name := filepath.base(config_path)
+    _, inot_err = linux.inotify_add_watch(fd, strings.clone_to_cstring(watch_dir, context.temp_allocator), {.MODIFY, .CREATE, .MOVED_TO, .MOVED_FROM})
+    if inot_err != .NONE {
+        log.errorf("couldnt initialize inotify", inot_err)
+        os.exit(1)
+    }
+    state.inotify_fd = fd
     state.height = cfg.height
     state.font = fontdata
     state.font_size = cfg.font_size
@@ -642,7 +681,92 @@ main :: proc() {
             wl_display_cancel_read(display)
         }
         wl.display_dispatch_pending(display)
+        if .IN in pollfds[1].revents {
+            n := 1
+            config_changed := false
+            for n > 0 {
+                buf: [4096]u8 = {}
+                n, inot_err = linux.read(state.inotify_fd, buf[:])
+                if inot_err != .NONE && inot_err != .EAGAIN {
+                    log.errorf("couldnt read from inotify %v", inot_err)
+                }
+                b := buf[:n]
+
+                for _, name in inotify_iter(&b) {
+                    if name == config_file_name {
+                        config_changed = true
+                    }
+                }
+            }
+            if config_changed {
+                reload_config(&state, config_path)
+            }
+        }
     }
+}
+reload_config :: proc(state: ^State, config_path: string) {
+    cfg, config_err := load_config(config_path)
+    if config_err != nil {
+        log.error("couldnt reload config", config_err)
+        return
+    } else {
+        new_fontdata, fonterr := os.read_entire_file_from_path(cfg.font, context.allocator)
+        if fonterr != nil {
+            log.errorf("while loading font: %v", fonterr)
+        } else {
+            delete(state.font)
+            state.font = new_fontdata
+        }
+    }
+    state.font_size = cfg.font_size 
+    state.height = cfg.height
+    color_ok := false
+    state.bg, color_ok = hex_to_color(cfg.background)
+    if !color_ok do state.bg = Color { 0, 0, 0, 0xFF }
+    state.fg, color_ok = hex_to_color(cfg.foreground)
+    if !color_ok do state.fg = Color { 0xFF, 0xFF, 0xFF, 0xFF }
+
+    state.tooltip_bg, color_ok = hex_to_color(cfg.tooltip_background)
+    if !color_ok do state.tooltip_bg = state.bg
+    state.tooltip_fg, color_ok = hex_to_color(cfg.tooltip_foreground)
+    if !color_ok do state.tooltip_fg = state.fg
+
+    state.menu_bg, color_ok = hex_to_color(cfg.menu_background)
+    if !color_ok do state.menu_bg = state.bg
+    state.menu_fg, color_ok = hex_to_color(cfg.menu_foreground)
+    if !color_ok do state.menu_fg = state.fg
+    for mon in state.monitors {
+        for &mod in mon.left {
+            if !mod.stopped do module_stop(&mod) 
+            module_delete(&mod)
+        }
+        for &mod in mon.right {
+            if !mod.stopped do module_stop(&mod) 
+            module_delete(&mod)
+        }
+        delete(mon.left)
+        delete(mon.right)
+        if mon.surface.nvg_ctx != nil do nvgl.Destroy(mon.surface.nvg_ctx)
+        if mon.surface.wl_surface != nil do surface_destroy(&mon.surface)
+        mon.surface.logical_h = int(state.height)
+        surface_init(&mon.surface, mon.output, state, mon.surface.logical_w, mon.surface.logical_h, LayerSurface{})
+        wl.display_roundtrip(state.display)
+        if (!egl.MakeCurrent(state.rctx.display, mon.surface.egl_surface, mon.surface.egl_surface, state.rctx.ctx)) {
+            log.error("Error making current")
+            return
+        }
+        mon.surface.nvg_ctx = nvgl.Create({ .ANTI_ALIAS })
+        nanovg.CreateFontMem(mon.surface.nvg_ctx, "sans", state.font, false)
+        mon.surface.redraw = true
+    }
+    for output, out_config in cfg.outputs {
+        monitor := get_monitor_by_name(state, output) 
+        if monitor == nil  { log.warnf("No output: %s", output); continue }
+        init_modules(&monitor.left, cfg, out_config.modules_left)
+        init_modules(&monitor.right, cfg, out_config.modules_right)
+    }
+    menu_close(state)
+    tooltip_destroy(state.tooltip, state)
 }
 
 

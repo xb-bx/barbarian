@@ -1,7 +1,6 @@
 package barbarian
 import "core:log"
 import "core:c"
-import "core:os"
 import "vendor:egl"
 import "vendor:nanovg"
 import wl   "wayland-odin/wayland"

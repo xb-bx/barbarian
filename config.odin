@@ -1,6 +1,5 @@
 package barbarian
 import "core:os"
-import "core:path/filepath"
 import "core:encoding/json"
 
 OutputConfig :: struct {
@@ -31,16 +30,6 @@ ConfigError :: union #shared_nil {
 }
 load_config :: proc(config_path: string) -> (cfg: ^Config, err: ConfigError) {
     config_path := config_path
-    if config_path == "" {
-        config_path = os.get_env("XDG_CONFIG_HOME", context.temp_allocator)
-        if config_path == "" {
-            arr := [4]string{os.get_env("HOME", context.temp_allocator), ".config", "barbarian", "config.json5"}
-            config_path, _ = filepath.join(arr[:], context.temp_allocator)
-        } else {
-            arr := [3]string{config_path, "barbarian", "config.json5"}
-            config_path, _ = filepath.join(arr[:], context.temp_allocator)
-        }
-    } 
 
     file := os.read_entire_file_from_path(config_path, context.allocator) or_return
     defer delete(file)
